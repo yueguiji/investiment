@@ -27,6 +27,7 @@ go-stock/build/dev-logs/
 go-stock/build/tmp/
 go-stock/img.png
 go-stock/wails-naive.png
+/go-stock/data/
 
 # Go
 *.test
