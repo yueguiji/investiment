@@ -1,0 +1,12 @@
+Rubin Investment
+Copyright 2026 Rubin Investment contributors
+
+This repository contains derivative work based on the open-source project:
+
+- go-stock
+  Upstream repository: https://github.com/ArvinLovegood/go-stock
+  Upstream license: Apache License 2.0
+
+The root repository reorganizes, integrates, and extends upstream capabilities
+for a local-first investment desktop workflow. Upstream attribution and license
+text are preserved in this repository.

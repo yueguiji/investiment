@@ -1,0 +1,22 @@
+{
+  "seedDbPaths": [
+    "D:/data/stock.db"
+  ],
+  "eastmoneyQgqpBId": "",
+  "assetUnlockPassword": "",
+  "xueqiuCookie": "",
+  "jiuyangongsheToken": "",
+  "jiuyangongsheCookie": "",
+  "newsSyncUrl": "http://go-stock.sparkmemory.top:16666/FinancialNews/json",
+  "shareUploadUrl": "http://go-stock.sparkmemory.top:16688/upload",
+  "stockBasicUrl": "http://8.134.249.145:18080/go-stock/stock_basic.json",
+  "stockBaseInfoHkUrl": "http://8.134.249.145:18080/go-stock/stock_base_info_hk.json",
+  "stockBaseInfoUsUrl": "http://8.134.249.145:18080/go-stock/stock_base_info_us.json",
+  "danmuWebsocketUrl": "ws://8.134.249.145:16688/ws",
+  "messageWallUrl": "https://go-stock.sparkmemory.top:16667/go-stock",
+  "releaseLatestUrl": "https://api.github.com/repos/ArvinLovegood/go-stock/releases/latest",
+  "releaseTagBaseUrl": "https://api.github.com/repos/ArvinLovegood/go-stock/git/ref/tags",
+  "releaseDownloadBaseUrl": "https://github.com/ArvinLovegood/go-stock/releases/download",
+  "releaseProxyDownloadBaseUrl": "https://gitproxy.click/https://github.com/ArvinLovegood/go-stock/releases/download",
+  "releasePageUrl": "https://github.com/ArvinLovegood/go-stock/releases"
+}

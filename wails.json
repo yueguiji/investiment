@@ -1,0 +1,19 @@
+{
+  "name": "rubin-investment",
+  "outputfilename": "investment-platform",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "author": {
+    "name": "Rubin Investment",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Rubin Investment",
+    "productName": "Rubin Investment",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026",
+    "comments": "Rubin Investment - 集资产分析、投资分析、持仓分析与量化能力于一体的桌面工具"
+  }
+}

@@ -1,0 +1,40 @@
+# Platform
+logs/
+data/
+*.db
+*.exe
+frontend/dist/
+frontend/node_modules/
+build/bin/
+build/export/
+build/dev-logs/
+build/tmp/
+test-results/
+wails-dev.*.log
+domdump*.txt
+domerr*.txt
+ui_tree.txt
+playwright*.png
+window_*.png
+startup_route.png
+printwindow_*.png
+check_*.png
+tmp_*.png
+after_fix_start.png
+production_window.png
+go-stock/build/screenshot/
+go-stock/build/dev-logs/
+go-stock/build/tmp/
+go-stock/img.png
+go-stock/wails-naive.png
+
+# Go
+*.test
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.codex/
+__tmp*.go
