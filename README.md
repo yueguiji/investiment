@@ -153,6 +153,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-wails-dev.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1
 ```
 
+### GitHub Releases
+
+每次发布版本时，建议使用 `v*` tag。
+
+例如：
+
+```powershell
+git tag -a v0.1.0-beta.2 -m "v0.1.0-beta.2"
+git push origin v0.1.0-beta.2
+```
+
+推送后，GitHub Actions 会自动：
+
+- 构建 Windows 版本
+- 生成版本化的 `exe`
+- 生成对应的 `zip`
+- 自动上传到 GitHub Releases
+
 ### Runtime Overrides
 
 Local private overrides are loaded from:
