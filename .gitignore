@@ -1,15 +1,15 @@
 # Platform
-logs/
-data/
+/logs/
+/data/
 *.db
 *.exe
-frontend/dist/
-frontend/node_modules/
-build/bin/
-build/export/
-build/dev-logs/
-build/tmp/
-test-results/
+/frontend/dist/
+/frontend/node_modules/
+/build/bin/
+/build/export/
+/build/dev-logs/
+/build/tmp/
+/test-results/
 wails-dev.*.log
 domdump*.txt
 domerr*.txt
@@ -36,5 +36,5 @@ vendor/
 .idea/
 .vscode/
 *.swp
-.codex/
+/.codex/
 __tmp*.go
