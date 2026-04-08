@@ -43,15 +43,18 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          set -euo pipefail
           tag="${{ github.ref_name }}"
-          app_name="investment-platform.app"
-          built_app="$PWD/build/bin/$app_name"
           release_dir="$PWD/release-assets"
 
-          if [ ! -d "$built_app" ]; then
-            echo "Built app bundle not found: $built_app"
+          built_app="$(find "$PWD/build/bin" -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          if [ -z "$built_app" ]; then
+            echo "Built app bundle not found under $PWD/build/bin"
             exit 1
           fi
+          app_name="$(basename "$built_app")"
+
+          echo "Using app bundle: $built_app"
 
           mkdir -p "$release_dir"
 
