@@ -72,6 +72,7 @@ func (a *App) startup(ctx context.Context) {
 	go a.ensureDefaultQuantPromptTemplate()
 	go a.ensureDefaultHouseholdPromptTemplate()
 	go a.ensureDefaultHouseholdChatPromptTemplate()
+	go a.ensureDefaultFundPromptTemplates()
 	go a.AssetService.InitDefaultHouseholdBenchmarks()
 	go a.ensureDefaultStockPromptTemplates()
 	go a.bootstrapGoStockRuntime()
@@ -760,7 +761,8 @@ func (a *App) AnalyzeFundWithAI(code string, aiConfigId int) map[string]any {
 		string(payload),
 	}, "\n")
 
-	return a.runFundAIAnalysis(aiConfigId, defaultFundAnalysisSystemPrompt, prompt)
+	systemPrompt, templateName := a.resolveFundSystemPrompt("single")
+	return a.runFundAIAnalysis(aiConfigId, systemPrompt, templateName, prompt)
 }
 
 func (a *App) AnalyzeFundCollectionWithAI(scope string, aiConfigId int) map[string]any {
@@ -795,7 +797,66 @@ func (a *App) AnalyzeFundCollectionWithAI(scope string, aiConfigId int) map[stri
 		string(body),
 	}, "\n")
 
-	return a.runFundAIAnalysis(aiConfigId, defaultFundCollectionSystemPrompt, prompt)
+	systemPrompt, templateName := a.resolveFundSystemPrompt("collection")
+	return a.runFundAIAnalysis(aiConfigId, systemPrompt, templateName, prompt)
+}
+
+func (a *App) AnalyzeBetterFundsWithAI(query portfolio.BetterFundQuery, topN int, aiConfigId int) map[string]any {
+	query.ReferenceCode = strings.TrimSpace(query.ReferenceCode)
+	if query.ReferenceCode == "" {
+		return map[string]any{"success": false, "message": "基金代码不能为空"}
+	}
+	if topN <= 0 {
+		topN = 3
+	}
+	if topN > 5 {
+		topN = 5
+	}
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.PageSize < topN {
+		query.PageSize = max(topN, 8)
+	}
+
+	result := a.PortfolioService.GetBetterFunds(query)
+	if result == nil || len(result.Candidates) == 0 {
+		return map[string]any{"success": false, "message": "当前栏目暂无可供 AI 分析的推荐基金"}
+	}
+
+	limit := topN
+	if len(result.Candidates) < limit {
+		limit = len(result.Candidates)
+	}
+	candidates := result.Candidates[:limit]
+
+	payload, _ := json.MarshalIndent(map[string]any{
+		"dimension":        result.Dimension,
+		"dimensionLabel":   betterDimensionLabel(result.Dimension),
+		"sortLabel":        result.SortLabel,
+		"scopeLabel":       result.ScopeLabel,
+		"comparedUniverse": result.ComparedUniverse,
+		"sameTypeOnly":     query.SameTypeOnly,
+		"dataHint":         result.DataHint,
+		"referenceFund":    result.Reference,
+		"topCandidates":    candidates,
+	}, "", "  ")
+
+	prompt := strings.Join([]string{
+		fmt.Sprintf("请比较当前“%s”栏目下的 Top%d 推荐基金，并输出 Markdown。", betterDimensionLabel(result.Dimension), limit),
+		"重点回答：",
+		"1. 先概括参考基金和 Top 候选基金在当前栏目维度下的差异。",
+		"2. 对每只候选基金分别说明优势、短板、适合什么观察场景。",
+		"3. 解释收益、回撤、夏普、Calmar、同类位置这些指标里，哪些最支持当前排序。",
+		"4. 如果只能优先跟踪 1 到 2 只，请明确写出理由。",
+		"5. 不给明确买卖指令，只给风格适配、风险提示和后续观察重点。",
+		"6. 只能基于输入数据分析，不要编造外部数据或官方排名。",
+		"数据如下：",
+		string(payload),
+	}, "\n")
+
+	systemPrompt, templateName := a.resolveFundSystemPrompt("recommendation")
+	return a.runFundAIAnalysis(aiConfigId, systemPrompt, templateName, prompt)
 }
 
 func (a *App) SyncPortfolioQuotes() *portfolio.PortfolioSummary {
@@ -810,7 +871,7 @@ func (a *App) SavePortfolioSnapshot() *portfolio.ProfitSnapshot {
 	return a.PortfolioService.SaveAndReturnDailySnapshot()
 }
 
-func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt string) map[string]any {
+func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, templateName string, userPrompt string) map[string]any {
 	if aiConfigId <= 0 {
 		configs := a.GetAiConfigs()
 		if len(configs) > 0 {
@@ -826,6 +887,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 			"analysis":  "",
 			"prompt":    userPrompt,
 			"aiEnabled": false,
+			"template":  templateName,
 		}
 	}
 
@@ -870,6 +932,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 			"prompt":    userPrompt,
 			"aiEnabled": true,
 			"model":     openAI.Model,
+			"template":  templateName,
 		}
 	}
 	if resp.StatusCode() >= 400 {
@@ -880,6 +943,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 			"prompt":    userPrompt,
 			"aiEnabled": true,
 			"model":     openAI.Model,
+			"template":  templateName,
 		}
 	}
 
@@ -892,6 +956,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 			"prompt":    userPrompt,
 			"aiEnabled": true,
 			"model":     openAI.Model,
+			"template":  templateName,
 		}
 	}
 	if len(aiResp.Choices) == 0 {
@@ -902,6 +967,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 			"prompt":    userPrompt,
 			"aiEnabled": true,
 			"model":     openAI.Model,
+			"template":  templateName,
 		}
 	}
 
@@ -913,6 +979,7 @@ func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt 
 		"prompt":    userPrompt,
 		"aiEnabled": true,
 		"model":     openAI.Model,
+		"template":  templateName,
 	}
 }
 
@@ -1263,6 +1330,12 @@ func (a *App) ensureDefaultHouseholdChatPromptTemplate() {
 	logger.SugaredLogger.Infof("seed household chat prompt template: %s", result)
 }
 
+func (a *App) ensureDefaultFundPromptTemplates() {
+	a.seedPromptTemplate(defaultFundAnalysisPromptTemplateName, defaultFundPromptTemplateType, defaultFundAnalysisSystemPrompt)
+	a.seedPromptTemplate(defaultFundCollectionPromptTemplateName, defaultFundPromptTemplateType, defaultFundCollectionSystemPrompt)
+	a.seedPromptTemplate(defaultFundRecommendationPromptTemplateName, defaultFundPromptTemplateType, defaultFundRecommendationSystemPrompt)
+}
+
 func (a *App) resolveHouseholdSystemPrompt(promptTemplateID int) string {
 	templateContent := ""
 	if promptTemplateID > 0 {
@@ -1297,6 +1370,40 @@ func (a *App) resolveHouseholdChatSystemPrompt(promptTemplateID int) string {
 		return defaultHouseholdChatPromptTemplateContent
 	}
 	return templateContent
+}
+
+func (a *App) resolveFundSystemPrompt(mode string) (string, string) {
+	defaultName := defaultFundAnalysisPromptTemplateName
+	fallback := defaultFundAnalysisSystemPrompt
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "collection":
+		defaultName = defaultFundCollectionPromptTemplateName
+		fallback = defaultFundCollectionSystemPrompt
+	case "recommendation":
+		defaultName = defaultFundRecommendationPromptTemplateName
+		fallback = defaultFundRecommendationSystemPrompt
+	}
+
+	api := data.NewPromptTemplateApi()
+	existing := api.GetPromptTemplates(defaultName, defaultFundPromptTemplateType)
+	if existing != nil && len(*existing) > 0 {
+		templateContent := strings.TrimSpace((*existing)[0].Content)
+		if templateContent != "" {
+			return templateContent, defaultName
+		}
+	}
+	return fallback, defaultName
+}
+
+func betterDimensionLabel(dimension string) string {
+	switch strings.ToLower(strings.TrimSpace(dimension)) {
+	case "lower_drawdown":
+		return "回撤更低"
+	case "higher_return":
+		return "收益更高"
+	default:
+		return "实力均衡更优"
+	}
 }
 
 func (a *App) buildHouseholdAnalysisPrompt(region string, inputPayload string) string {
@@ -1540,6 +1647,11 @@ const defaultHouseholdPromptTemplateName = "家庭资产分析-标准模板"
 const defaultHouseholdChatPromptTemplateName = "家庭数字分析-连续对话模板"
 const defaultHouseholdPromptTemplateType = "模型系统Prompt"
 
+const defaultFundAnalysisPromptTemplateName = "基金分析-标准模板"
+const defaultFundCollectionPromptTemplateName = "基金组合分析-标准模板"
+const defaultFundRecommendationPromptTemplateName = "基金对比推荐分析-标准模板"
+const defaultFundPromptTemplateType = "模型系统Prompt"
+
 var defaultQuantPromptTemplateContent = strings.Join([]string{
 	"你是一名资深量化研究员、Python 量化工程师和交易系统架构师。",
 	"",
@@ -1624,6 +1736,14 @@ var defaultFundCollectionSystemPrompt = strings.Join([]string{
 	"输出必须用简体中文 Markdown。",
 	"不要给出确定性的买卖建议，不要承诺收益，不要编造输入之外的数据。",
 	"重点说明组合里谁贡献收益、谁拖累表现、回撤风险来自哪里、保守资产是否足够。",
+}, "\n")
+
+var defaultFundRecommendationSystemPrompt = strings.Join([]string{
+	"你是一名偏审慎风格的基金比较分析助手，擅长基于给定的收益、回撤、夏普、Calmar、同类位置和推荐理由，比较多只基金谁更适合当前观察目标。",
+	"输出必须使用简体中文 Markdown，先给结论，再解释依据。",
+	"你只能基于输入数据分析，不要编造外部评级、官方排名、基金经理观点或未提供的行情数据。",
+	"要把每只候选基金的优势、短板、适配场景写清楚，并解释为什么当前排序成立或不成立。",
+	"不要给确定性的买卖指令，只给风险提示、观察重点和更适合的资金属性。",
 }, "\n")
 
 func extractPythonBlock(content string) string {

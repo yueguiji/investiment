@@ -30,6 +30,10 @@ export function AddTransaction(arg1) {
   return window['go']['main']['App']['AddTransaction'](arg1);
 }
 
+export function AnalyzeBetterFundsWithAI(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AnalyzeBetterFundsWithAI'](arg1, arg2, arg3);
+}
+
 export function AnalyzeFundCollectionWithAI(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeFundCollectionWithAI'](arg1, arg2);
 }
@@ -148,6 +152,10 @@ export function DeleteAllStockInfo(arg1) {
 
 export function DeleteAsset(arg1) {
   return window['go']['main']['App']['DeleteAsset'](arg1);
+}
+
+export function DeleteFundWatchGroup(arg1) {
+  return window['go']['main']['App']['DeleteFundWatchGroup'](arg1);
 }
 
 export function DeleteHolding(arg1) {
@@ -540,6 +548,10 @@ export function RemoveGroup(arg1) {
 
 export function RemoveStockGroup(arg1, arg2, arg3) {
   return window['go']['main']['App']['RemoveStockGroup'](arg1, arg2, arg3);
+}
+
+export function RenameFundWatchGroup(arg1, arg2) {
+  return window['go']['main']['App']['RenameFundWatchGroup'](arg1, arg2);
 }
 
 export function RunHouseholdAIAnalysis(arg1, arg2, arg3, arg4) {

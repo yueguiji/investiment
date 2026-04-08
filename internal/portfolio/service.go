@@ -20,6 +20,7 @@ type Service struct{}
 type fundRefreshRuntimeState struct {
 	mu            sync.Mutex
 	refreshing    bool
+	scope         string
 	progressNow   int64
 	progressTotal int64
 	currentCode   string
@@ -28,6 +29,50 @@ type fundRefreshRuntimeState struct {
 }
 
 var fundRefreshState fundRefreshRuntimeState
+
+const (
+	fundRefreshStateNotStarted = "not_started"
+	fundRefreshStatePartial    = "partial"
+	fundRefreshStateCompleted  = "completed"
+	fundRefreshScopeFocused    = "watchlist_related"
+	fundRefreshScopeAll        = "all_pending"
+)
+
+type betterCandidateUniverse struct {
+	Basics           []data.FundBasic
+	ScopeLabel       string
+	FallbackApplied  bool
+	ComparedUniverse int
+}
+
+type fundRefreshScopeSnapshot struct {
+	Scope        string
+	TargetCount  int64
+	UpdatedToday int64
+	PendingCount int64
+}
+
+type betterMetricSpec struct {
+	Key     string
+	Label   string
+	Better  string
+	Weight  float64
+	Format  string
+	ValueOf func(data.FundBasic) *float64
+}
+
+type betterMetricRank struct {
+	Rank       int
+	Total      int
+	Percentile *float64
+}
+
+type fundRiskSnapshot struct {
+	MaxDrawdown12 *float64
+	Volatility12  *float64
+	Sharpe12      *float64
+	Calmar12      *float64
+}
 
 func NewService() *Service {
 	return &Service{}
@@ -625,10 +670,48 @@ func (s *Service) EnsureFundUniverse() int64 {
 	return total
 }
 
+func resolveFundRefreshScope(limit int) (string, int) {
+	if limit < 0 {
+		return fundRefreshScopeAll, 0
+	}
+	if limit == 0 {
+		return fundRefreshScopeFocused, 0
+	}
+	return fundRefreshScopeFocused, limit
+}
+
+func defaultFundRefreshScope() string {
+	return fundRefreshScopeFocused
+}
+
 func (s *Service) ensureFundScreenerFreshAsync(limit int) FundRefreshStatus {
+	return s.startFundScreenerRefresh(limit, false)
+}
+
+func (s *Service) startFundScreenerRefresh(limit int, force bool) FundRefreshStatus {
 	universeCount := s.EnsureFundUniverse()
+	today := time.Now().Format("2006-01-02")
+	scope, batchLimit := resolveFundRefreshScope(limit)
+	scopeStatus := s.loadFundRefreshScopeSnapshot(scope, today, universeCount)
 	status := s.buildFundRefreshStatus(universeCount)
-	if !status.NeedsRefresh || status.Refreshing {
+	if status.Refreshing {
+		return status
+	}
+	if scopeStatus.PendingCount == 0 {
+		status.Scope = scope
+		status.TargetCount = scopeStatus.TargetCount
+		status.TargetUpdated = scopeStatus.UpdatedToday
+		status.TargetPending = scopeStatus.PendingCount
+		status.State, status.StateLabel = resolveFundRefreshState(scopeStatus.UpdatedToday, scopeStatus.TargetCount, scopeStatus.PendingCount)
+		status.NeedsRefresh = false
+		if force {
+			switch scope {
+			case fundRefreshScopeAll:
+				status.Message = "Today's full-universe fund metrics are already complete."
+			default:
+				status.Message = "Today's watchlist-related fund metrics are already complete."
+			}
+		}
 		return status
 	}
 
@@ -638,21 +721,38 @@ func (s *Service) ensureFundScreenerFreshAsync(limit int) FundRefreshStatus {
 		return s.buildFundRefreshStatus(universeCount)
 	}
 	fundRefreshState.refreshing = true
+	fundRefreshState.scope = scope
 	fundRefreshState.progressNow = 0
 	fundRefreshState.progressTotal = 0
 	fundRefreshState.currentCode = ""
 	fundRefreshState.lastStarted = time.Now()
 	fundRefreshState.mu.Unlock()
 
-	go s.runFundScreenerRefresh(limit)
+	go s.runFundScreenerRefresh(batchLimit, scope)
 
 	status = s.buildFundRefreshStatus(universeCount)
 	status.Triggered = true
-	status.Message = "Today's first request started a background fund refresh. Current screening uses local cache and will improve as updates finish."
+	switch {
+	case scope == fundRefreshScopeAll && force:
+		status.Message = "Manual full refresh started in the background. Remaining funds across the whole universe will be caught up today."
+	case scope == fundRefreshScopeAll:
+		status.Message = "A background full refresh has resumed for the whole fund universe."
+	case batchLimit > 0:
+		status.Message = "Manual watchlist-related refresh started in the background. This batch will update your followed and holding funds first."
+	case force:
+		status.Message = "Manual watchlist-related refresh started in the background. Followed funds, holdings, and recommendation candidates will be caught up today."
+	case status.State == fundRefreshStatePartial:
+		status.Message = "Today's watchlist-related metrics are only partially updated. A background refresh has resumed for followed funds, holdings, and recommendation candidates."
+	default:
+		status.Message = "Today's first request started a background watchlist-related refresh. Followed funds, holdings, and recommendation candidates will improve first."
+	}
 	return status
 }
 
-func (s *Service) runFundScreenerRefresh(limit int) {
+func (s *Service) runFundScreenerRefresh(limit int, scope string) {
+	var queuedCount int
+	var successCount int
+	today := time.Now().Format("2006-01-02")
 	defer func() {
 		if r := recover(); r != nil {
 			logger.SugaredLogger.Errorf("fund screener refresh panic: %v", r)
@@ -660,30 +760,35 @@ func (s *Service) runFundScreenerRefresh(limit int) {
 		}
 		fundRefreshState.mu.Lock()
 		fundRefreshState.refreshing = false
+		fundRefreshState.scope = ""
 		fundRefreshState.currentCode = ""
 		fundRefreshState.lastFinished = time.Now()
 		fundRefreshState.mu.Unlock()
 	}()
 
 	var basics []data.FundBasic
-	query := db.Dao.Order("CASE WHEN screen_updated_at IS NULL OR screen_updated_at = '' THEN 0 ELSE 1 END asc").
+	query := s.buildFundRefreshQuery(scope, today).
+		Order("CASE WHEN screen_updated_at IS NULL OR screen_updated_at = '' THEN 0 ELSE 1 END asc").
 		Order("screen_updated_at asc").
 		Order("updated_at asc")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
 	query.Find(&basics)
+	queuedCount = len(basics)
 
 	fundRefreshState.mu.Lock()
 	fundRefreshState.progressTotal = int64(len(basics))
 	fundRefreshState.mu.Unlock()
 
+	logger.SugaredLogger.Infof("fund screener refresh started: scope=%s limit=%d queued=%d", scope, limit, queuedCount)
+
 	for idx, basic := range basics {
 		fundRefreshState.mu.Lock()
-		fundRefreshState.progressNow = int64(idx)
 		fundRefreshState.currentCode = basic.Code
 		fundRefreshState.mu.Unlock()
 
+		refreshed := false
 		func(code string) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -691,13 +796,35 @@ func (s *Service) runFundScreenerRefresh(limit int) {
 					logger.SugaredLogger.Errorf("fund screener refresh stack for %s: %s", code, string(debug.Stack()))
 				}
 			}()
-			s.refreshFundScreeningMetrics(code)
+			refreshed = s.refreshFundScreeningMetrics(code)
 		}(basic.Code)
+		if refreshed {
+			successCount++
+		}
+
+		fundRefreshState.mu.Lock()
+		fundRefreshState.progressNow = int64(idx + 1)
+		fundRefreshState.mu.Unlock()
 	}
 
 	fundRefreshState.mu.Lock()
 	fundRefreshState.progressNow = int64(len(basics))
 	fundRefreshState.mu.Unlock()
+
+	logger.SugaredLogger.Infof("fund screener refresh finished: scope=%s limit=%d queued=%d refreshed=%d", scope, limit, queuedCount, successCount)
+}
+
+func resolveFundRefreshState(updatedToday, targetCount, pendingCount int64) (string, string) {
+	switch {
+	case targetCount <= 0:
+		return fundRefreshStateCompleted, "今日完成"
+	case updatedToday <= 0:
+		return fundRefreshStateNotStarted, "未开始"
+	case pendingCount > 0:
+		return fundRefreshStatePartial, "部分更新"
+	default:
+		return fundRefreshStateCompleted, "今日完成"
+	}
 }
 
 func (s *Service) buildFundRefreshStatus(universeCount int64) FundRefreshStatus {
@@ -705,26 +832,49 @@ func (s *Service) buildFundRefreshStatus(universeCount int64) FundRefreshStatus 
 	lastRefreshHint := loadFundScreenRefreshHint()
 	screenedCount := loadScreenedFundCount()
 	updatedToday := loadUpdatedTodayFundCount(today)
-	needsRefresh := updatedToday == 0
 
 	fundRefreshState.mu.Lock()
 	refreshing := fundRefreshState.refreshing
+	scope := fundRefreshState.scope
 	progressNow := fundRefreshState.progressNow
 	progressTotal := fundRefreshState.progressTotal
 	currentCode := fundRefreshState.currentCode
 	fundRefreshState.mu.Unlock()
 
+	if strings.TrimSpace(scope) == "" {
+		scope = defaultFundRefreshScope()
+	}
+
+	scopeStatus := s.loadFundRefreshScopeSnapshot(scope, today, universeCount)
+	state, stateLabel := resolveFundRefreshState(scopeStatus.UpdatedToday, scopeStatus.TargetCount, scopeStatus.PendingCount)
+	needsRefresh := scopeStatus.PendingCount > 0
+
 	message := ""
 	switch {
 	case refreshing:
-		message = "Fund metrics are refreshing in the background. Screening and recommendations will improve as progress advances."
-	case needsRefresh:
-		message = "Fund metrics have not been refreshed today yet. The first request will trigger a background refresh."
+		if scope == fundRefreshScopeAll {
+			message = "A full-universe fund refresh is running in the background."
+		} else {
+			message = "A watchlist-related fund refresh is running in the background."
+		}
+	case scopeStatus.TargetCount == 0:
+		message = "There are no watchlist or holding funds yet, so daily focused refresh is idle."
+	case state == fundRefreshStateNotStarted:
+		message = "Today's watchlist-related fund metrics have not started refreshing yet."
+	case state == fundRefreshStatePartial:
+		message = "Today's watchlist-related fund metrics are only partially updated."
 	default:
-		message = "Today's fund metrics are ready for screening and recommendation."
+		if scope == fundRefreshScopeAll {
+			message = "Today's full-universe fund metrics are ready."
+		} else {
+			message = "Today's watchlist-related fund metrics are ready."
+		}
 	}
 
 	return FundRefreshStatus{
+		State:           state,
+		StateLabel:      stateLabel,
+		Scope:           scope,
 		Refreshing:      refreshing,
 		NeedsRefresh:    needsRefresh,
 		CurrentDate:     today,
@@ -732,6 +882,9 @@ func (s *Service) buildFundRefreshStatus(universeCount int64) FundRefreshStatus 
 		UpdatedToday:    updatedToday,
 		ScreenedCount:   screenedCount,
 		UniverseCount:   universeCount,
+		TargetCount:     scopeStatus.TargetCount,
+		TargetUpdated:   scopeStatus.UpdatedToday,
+		TargetPending:   scopeStatus.PendingCount,
 		ProgressCurrent: progressNow,
 		ProgressTotal:   progressTotal,
 		CurrentCode:     currentCode,
@@ -757,48 +910,216 @@ func (s *Service) ensureFundMetricsFreshToday(code string) {
 
 func (s *Service) RefreshFundScreenerData(limit int) map[string]any {
 	universeCount := s.EnsureFundUniverse()
-
-	var basics []data.FundBasic
-	query := db.Dao.Order("CASE WHEN screen_updated_at IS NULL OR screen_updated_at = '' THEN 0 ELSE 1 END asc").
-		Order("screen_updated_at asc").
-		Order("updated_at asc")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	query.Find(&basics)
-
-	refreshed := 0
-	withIndustry := 0
-	withDrawdown := 0
-	for _, basic := range basics {
-		if s.refreshFundScreeningMetrics(basic.Code) {
-			refreshed++
-		}
-
-		var current data.FundBasic
-		if err := db.Dao.Where("code = ?", basic.Code).First(&current).Error; err == nil {
-			if strings.TrimSpace(current.TopIndustry) != "" {
-				withIndustry++
-			}
-			if current.MaxDrawdown12 != nil {
-				withDrawdown++
-			}
-		}
-	}
-
-	var screenedCount int64
-	db.Dao.Model(&data.FundBasic{}).
-		Where("screen_updated_at IS NOT NULL AND screen_updated_at <> ''").
-		Count(&screenedCount)
+	status := s.startFundScreenerRefresh(limit, true)
+	scope, _ := resolveFundRefreshScope(limit)
 
 	return map[string]any{
 		"universeCount": universeCount,
-		"refreshed":     refreshed,
-		"withIndustry":  withIndustry,
-		"withDrawdown":  withDrawdown,
-		"screenedCount": screenedCount,
+		"started":       status.Triggered,
+		"scope":         scope,
+		"screenedCount": loadScreenedFundCount(),
 		"updatedToday":  loadUpdatedTodayFundCount(time.Now().Format("2006-01-02")),
+		"refreshStatus": status,
 	}
+}
+
+func buildPendingFundRefreshQuery(today string) *gorm.DB {
+	return db.Dao.Where(
+		"screen_updated_at IS NULL OR screen_updated_at = '' OR substr(screen_updated_at, 1, 10) <> ?",
+		strings.TrimSpace(today),
+	)
+}
+
+func loadPendingFundRefreshCount(today string) int64 {
+	var count int64
+	buildPendingFundRefreshQuery(today).Model(&data.FundBasic{}).Count(&count)
+	return count
+}
+
+func (s *Service) buildFundRefreshQuery(scope string, today string) *gorm.DB {
+	switch scope {
+	case fundRefreshScopeAll:
+		return buildPendingFundRefreshQuery(today)
+	default:
+		codes := s.loadFocusedFundRefreshCodes()
+		if len(codes) == 0 {
+			return db.Dao.Where("1 = 0")
+		}
+		s.ensureFundBasicsForCodes(codes)
+		return buildPendingFundRefreshQuery(today).Where("code IN ?", codes)
+	}
+}
+
+func (s *Service) loadFundRefreshScopeSnapshot(scope string, today string, universeCount int64) fundRefreshScopeSnapshot {
+	switch scope {
+	case fundRefreshScopeAll:
+		return fundRefreshScopeSnapshot{
+			Scope:        scope,
+			TargetCount:  universeCount,
+			UpdatedToday: loadUpdatedTodayFundCount(today),
+			PendingCount: loadPendingFundRefreshCount(today),
+		}
+	default:
+		codes := s.loadFocusedFundRefreshCodes()
+		return fundRefreshScopeSnapshot{
+			Scope:        fundRefreshScopeFocused,
+			TargetCount:  int64(len(codes)),
+			UpdatedToday: loadUpdatedTodayFundCountByCodes(codes, today),
+			PendingCount: loadPendingFundRefreshCountByCodes(codes, today),
+		}
+	}
+}
+
+func loadUpdatedTodayFundCountByCodes(codes []string, today string) int64 {
+	if len(codes) == 0 {
+		return 0
+	}
+	var count int64
+	db.Dao.Model(&data.FundBasic{}).
+		Where("code IN ?", codes).
+		Where("substr(screen_updated_at, 1, 10) = ?", strings.TrimSpace(today)).
+		Count(&count)
+	return count
+}
+
+func loadPendingFundRefreshCountByCodes(codes []string, today string) int64 {
+	if len(codes) == 0 {
+		return 0
+	}
+	var count int64
+	buildPendingFundRefreshQuery(today).
+		Model(&data.FundBasic{}).
+		Where("code IN ?", codes).
+		Count(&count)
+	return count
+}
+
+func (s *Service) loadFocusedFundRefreshCodes() []string {
+	codeSet := make(map[string]struct{})
+	for _, code := range loadFundWatchlistCodes() {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+	holdingCodes := loadFundHoldingCodes()
+	for _, code := range holdingCodes {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+
+	seedCodes := sortedCodeKeys(codeSet)
+	if len(seedCodes) == 0 {
+		return seedCodes
+	}
+
+	s.ensureFundBasicsForCodes(seedCodes)
+	for _, code := range s.collectRecommendedFundCodes(loadFundWatchlistCodes(), 3) {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+
+	return sortedCodeKeys(codeSet)
+}
+
+func loadFundWatchlistCodes() []string {
+	var codes []string
+	db.Dao.Model(&data.FollowedFund{}).
+		Where("is_watchlist = ?", true).
+		Pluck("code", &codes)
+	return dedupeCodes(codes)
+}
+
+func loadFundHoldingCodes() []string {
+	var codes []string
+	db.Dao.Model(&Holding{}).
+		Where("holding_type = ? AND quantity > 0", "fund").
+		Pluck("stock_code", &codes)
+	return dedupeCodes(codes)
+}
+
+func (s *Service) ensureFundBasicsForCodes(codes []string) {
+	if len(codes) == 0 {
+		return
+	}
+
+	var existing []string
+	db.Dao.Model(&data.FundBasic{}).Where("code IN ?", codes).Pluck("code", &existing)
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, code := range existing {
+		existingSet[strings.TrimSpace(code)] = struct{}{}
+	}
+
+	api := data.NewFundApi()
+	for _, code := range codes {
+		trimmed := strings.TrimSpace(code)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := existingSet[trimmed]; ok {
+			continue
+		}
+		api.CrawlFundBasic(trimmed)
+	}
+}
+
+func (s *Service) collectRecommendedFundCodes(referenceCodes []string, perDimension int) []string {
+	if len(referenceCodes) == 0 || perDimension <= 0 {
+		return []string{}
+	}
+
+	codeSet := make(map[string]struct{})
+	dimensions := []string{"balanced", "higher_return", "lower_drawdown"}
+	for _, code := range dedupeCodes(referenceCodes) {
+		reference, err := dbQueryFundBasic(code)
+		if err != nil || reference == nil {
+			continue
+		}
+		refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
+		universe := loadBetterFundUniverse(*reference, refCategory.Category, true)
+		if len(universe.Basics) == 0 {
+			continue
+		}
+		for _, dimension := range dimensions {
+			candidates := buildBetterFundCandidates(*reference, universe, dimension)
+			sort.Slice(candidates, func(i, j int) bool {
+				if candidates[i].BetterScore == candidates[j].BetterScore {
+					return candidates[i].Code < candidates[j].Code
+				}
+				return candidates[i].BetterScore > candidates[j].BetterScore
+			})
+			for i := 0; i < len(candidates) && i < perDimension; i++ {
+				if strings.TrimSpace(candidates[i].Code) == "" || candidates[i].BetterScore <= 0 {
+					continue
+				}
+				codeSet[candidates[i].Code] = struct{}{}
+			}
+		}
+	}
+	return sortedCodeKeys(codeSet)
+}
+
+func dedupeCodes(codes []string) []string {
+	codeSet := make(map[string]struct{})
+	for _, code := range codes {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+	return sortedCodeKeys(codeSet)
+}
+
+func sortedCodeKeys(codeSet map[string]struct{}) []string {
+	if len(codeSet) == 0 {
+		return []string{}
+	}
+	codes := make([]string, 0, len(codeSet))
+	for code := range codeSet {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
 }
 
 func (s *Service) GetFundScreener(query FundScreenerQuery) *FundScreenerResult {
@@ -914,12 +1235,19 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 	if err := db.Dao.Where("code = ?", code).First(&reference).Error; err != nil {
 		return nil
 	}
+	if !isSameTradingDayString(reference.ScreenUpdatedAt, time.Now()) {
+		s.refreshFundScreeningMetrics(code)
+		if refreshed, err := dbQueryFundBasic(code); err == nil && refreshed != nil {
+			reference = *refreshed
+		}
+	}
 
 	refItem := buildFundScreenerItem(reference, isFundWatchlisted(code))
 	refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
 	refreshStatus := s.ensureFundScreenerFreshAsync(0)
-	candidates := loadBetterFundCandidates(reference, refCategory.Category, query.Dimension, query.SameTypeOnly)
-	if query.SameTypeOnly && len(candidates) == 0 {
+	universe := loadBetterFundUniverse(reference, refCategory.Category, query.SameTypeOnly)
+	candidates := buildBetterFundCandidates(reference, universe, query.Dimension)
+	if false && query.SameTypeOnly && len(candidates) == 0 {
 		candidates = loadBetterFundCandidates(reference, refCategory.Category, query.Dimension, false)
 		for i := range candidates {
 			candidates[i].Reasons = append([]string{"同类型暂无更优，已放宽到同大类继续筛选"}, candidates[i].Reasons...)
@@ -933,6 +1261,14 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 		}
 		return candidates[i].BetterScore > candidates[j].BetterScore
 	})
+	for i := range candidates {
+		candidates[i].RecommendationRank = i + 1
+		if universe.FallbackApplied {
+			candidates[i].Reasons = append([]string{"同类型暂无更优，已放宽到同大类继续筛选"}, candidates[i].Reasons...)
+			candidates[i].ReasonSummary = strings.Join(topStrings(candidates[i].Reasons, 3), " / ")
+			candidates[i].BetterScore = roundPercent(candidates[i].BetterScore * 0.92)
+		}
+	}
 
 	total := int64(len(candidates))
 	start := (query.Page - 1) * query.PageSize
@@ -945,13 +1281,18 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 	}
 
 	return &BetterFundResult{
-		Reference:     refItem,
-		Candidates:    candidates[start:end],
-		Dimension:     query.Dimension,
-		Total:         total,
-		Page:          query.Page,
-		PageSize:      query.PageSize,
-		RefreshStatus: refreshStatus,
+		Reference:        refItem,
+		Candidates:       candidates[start:end],
+		Dimension:        query.Dimension,
+		SortLabel:        betterSortLabel(query.Dimension),
+		ScopeLabel:       universe.ScopeLabel,
+		ComparedUniverse: universe.ComparedUniverse,
+		FallbackApplied:  universe.FallbackApplied,
+		DataHint:         betterDataHint(refreshStatus, universe),
+		Total:            total,
+		Page:             query.Page,
+		PageSize:         query.PageSize,
+		RefreshStatus:    refreshStatus,
 	}
 }
 
@@ -1040,6 +1381,384 @@ func loadBetterFundCandidates(reference data.FundBasic, refCategory string, dime
 	return candidates
 }
 
+func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTypeOnly bool) betterCandidateUniverse {
+	if sameTypeOnly && strings.TrimSpace(reference.Type) != "" {
+		basics := queryBetterFundBasics(reference, refCategory, true)
+		if len(basics) > 0 {
+			return betterCandidateUniverse{
+				Basics:           basics,
+				ScopeLabel:       "同类型精确匹配：" + strings.TrimSpace(reference.Type),
+				ComparedUniverse: len(basics) + 1,
+			}
+		}
+		basics = queryBetterFundBasics(reference, refCategory, false)
+		return betterCandidateUniverse{
+			Basics:           basics,
+			ScopeLabel:       "同类型暂无更优，已放宽到同大类：" + betterCategoryLabel(refCategory),
+			FallbackApplied:  true,
+			ComparedUniverse: len(basics) + 1,
+		}
+	}
+
+	basics := queryBetterFundBasics(reference, refCategory, false)
+	return betterCandidateUniverse{
+		Basics:           basics,
+		ScopeLabel:       "同大类匹配：" + betterCategoryLabel(refCategory),
+		ComparedUniverse: len(basics) + 1,
+	}
+}
+
+func queryBetterFundBasics(reference data.FundBasic, refCategory string, exactType bool) []data.FundBasic {
+	dbQuery := db.Dao.Model(&data.FundBasic{}).
+		Where("code <> ?", reference.Code).
+		Where("screen_updated_at IS NOT NULL AND screen_updated_at <> ''")
+	if exactType && strings.TrimSpace(reference.Type) != "" {
+		dbQuery = dbQuery.Where("type = ?", reference.Type)
+	} else {
+		dbQuery = applyFundCategoryDBFilter(dbQuery, refCategory)
+	}
+
+	var basics []data.FundBasic
+	dbQuery.Order("updated_at desc").Order("code asc").Find(&basics)
+	return basics
+}
+
+func buildBetterFundCandidates(reference data.FundBasic, universe betterCandidateUniverse, dimension string) []BetterFundCandidate {
+	if len(universe.Basics) == 0 {
+		return []BetterFundCandidate{}
+	}
+
+	specs := betterMetricSpecsForDimension(dimension)
+	rankUniverse := make([]data.FundBasic, 0, len(universe.Basics)+1)
+	rankUniverse = append(rankUniverse, reference)
+	rankUniverse = append(rankUniverse, universe.Basics...)
+
+	rankMaps := make(map[string]map[string]betterMetricRank, len(specs))
+	for _, spec := range specs {
+		rankMaps[spec.Key] = buildBetterMetricRanks(rankUniverse, spec)
+	}
+
+	watchlistMap := loadFundWatchlistMap(universe.Basics)
+	candidates := make([]BetterFundCandidate, 0, len(universe.Basics))
+	for _, basic := range universe.Basics {
+		candidate, ok := buildBetterFundCandidateV2(reference, basic, watchlistMap[basic.Code], dimension, specs, rankMaps, universe)
+		if ok {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates
+}
+
+func betterMetricSpecsForDimension(dimension string) []betterMetricSpec {
+	specs := []betterMetricSpec{
+		{Key: "growth3", Label: "近3月", Better: "higher", Weight: 0.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+		{Key: "growth6", Label: "近6月", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+		{Key: "growth12", Label: "近1年", Better: "higher", Weight: 1.05, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+		{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.10, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+		{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.85, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+		{Key: "calmar12", Label: "Calmar", Better: "higher", Weight: 0.70, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Calmar12 }},
+		{Key: "volatility12", Label: "近1年波动", Better: "lower", Weight: 0.40, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.Volatility12 }},
+	}
+
+	switch normalizeBetterFundDimension(dimension) {
+	case "lower_drawdown":
+		return []betterMetricSpec{
+			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+			{Key: "volatility12", Label: "近1年波动", Better: "lower", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.Volatility12 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.60, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+			{Key: "growth3", Label: "近3月", Better: "higher", Weight: 0.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+			{Key: "growth6", Label: "近6月", Better: "higher", Weight: 0.45, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+			{Key: "growth12", Label: "近1年", Better: "higher", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+		}
+	case "higher_return":
+		return []betterMetricSpec{
+			{Key: "growth7", Label: "近7天", Better: "higher", Weight: 0.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth7 }},
+			{Key: "growth1", Label: "近1月", Better: "higher", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth1 }},
+			{Key: "growth3", Label: "近3月", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+			{Key: "growth6", Label: "近6月", Better: "higher", Weight: 1.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+			{Key: "growth12", Label: "近1年", Better: "higher", Weight: 1.15, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.55, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+		}
+	default:
+		return specs
+	}
+}
+
+func buildBetterFundCandidateV2(reference data.FundBasic, candidate data.FundBasic, watchlist bool, dimension string, specs []betterMetricSpec, rankMaps map[string]map[string]betterMetricRank, universe betterCandidateUniverse) (BetterFundCandidate, bool) {
+	item := buildFundScreenerItem(candidate, watchlist)
+	metrics := make([]BetterFundMetric, 0, len(specs))
+	type scoredReason struct {
+		text  string
+		score float64
+	}
+	scoredReasons := make([]scoredReason, 0, len(specs))
+	score := 0.0
+	hasReturnAdvantage := false
+	hasRiskAdvantage := false
+
+	for _, spec := range specs {
+		metric := buildBetterMetric(reference, candidate, spec, rankMaps[spec.Key])
+		if metric.Contribution > 0 {
+			score += metric.Contribution
+			scoredReasons = append(scoredReasons, scoredReason{
+				text:  describeBetterMetric(metric, spec.Format),
+				score: metric.Contribution,
+			})
+			if isReturnBetterMetric(spec.Key) {
+				hasReturnAdvantage = true
+			}
+			if isRiskBetterMetric(spec.Key) {
+				hasRiskAdvantage = true
+			}
+		}
+		metrics = append(metrics, metric)
+	}
+
+	switch normalizeBetterFundDimension(dimension) {
+	case "lower_drawdown":
+		if !hasRiskAdvantage {
+			return BetterFundCandidate{}, false
+		}
+	case "higher_return":
+		if !hasReturnAdvantage {
+			return BetterFundCandidate{}, false
+		}
+	default:
+		if !hasReturnAdvantage && !hasRiskAdvantage {
+			return BetterFundCandidate{}, false
+		}
+	}
+
+	if score <= 0 {
+		return BetterFundCandidate{}, false
+	}
+
+	sort.Slice(scoredReasons, func(i, j int) bool {
+		if scoredReasons[i].score == scoredReasons[j].score {
+			return scoredReasons[i].text < scoredReasons[j].text
+		}
+		return scoredReasons[i].score > scoredReasons[j].score
+	})
+
+	reasons := make([]string, 0, len(scoredReasons))
+	for _, item := range scoredReasons {
+		reasons = append(reasons, item.text)
+	}
+
+	return BetterFundCandidate{
+		FundScreenerItem: item,
+		BetterScore:      roundPercent(score),
+		ReasonSummary:    strings.Join(topStrings(reasons, 3), " / "),
+		ScopeLabel:       universe.ScopeLabel,
+		ComparedUniverse: universe.ComparedUniverse,
+		Reasons:          reasons,
+		Metrics:          metrics,
+	}, true
+}
+
+func buildBetterMetric(reference data.FundBasic, candidate data.FundBasic, spec betterMetricSpec, rankMap map[string]betterMetricRank) BetterFundMetric {
+	candidateValue := cloneFloat(spec.ValueOf(candidate))
+	referenceValue := cloneFloat(spec.ValueOf(reference))
+	metric := BetterFundMetric{
+		Key:            spec.Key,
+		Label:          spec.Label,
+		Better:         spec.Better,
+		CandidateValue: candidateValue,
+		ReferenceValue: referenceValue,
+		Weight:         spec.Weight,
+	}
+
+	if candidateValue != nil && referenceValue != nil {
+		delta := roundPercent(*candidateValue - *referenceValue)
+		metric.Delta = &delta
+
+		advantage := *candidateValue - *referenceValue
+		if spec.Better == "lower" {
+			advantage = *referenceValue - *candidateValue
+		}
+		if advantage > 0 {
+			metricAdvantage := roundPercent(advantage)
+			metric.Advantage = &metricAdvantage
+			metric.Contribution = roundPercent(metric.Contribution + metricAdvantage*spec.Weight)
+		}
+	}
+
+	if rank, ok := rankMap[candidate.Code]; ok {
+		metric.CandidateRank = rank.Rank
+		metric.RankTotal = rank.Total
+		metric.CandidatePercentile = cloneFloat(rank.Percentile)
+	}
+	if rank, ok := rankMap[reference.Code]; ok {
+		metric.ReferenceRank = rank.Rank
+		if metric.RankTotal == 0 {
+			metric.RankTotal = rank.Total
+		}
+		metric.ReferencePercentile = cloneFloat(rank.Percentile)
+	}
+
+	rankEdge := 0.0
+	if metric.CandidatePercentile != nil {
+		if metric.ReferencePercentile != nil {
+			rankEdge = *metric.CandidatePercentile - *metric.ReferencePercentile
+		} else {
+			rankEdge = *metric.CandidatePercentile - 50
+		}
+	}
+	if rankEdge > 0 {
+		metric.Contribution = roundPercent(metric.Contribution + rankEdge*spec.Weight*0.03)
+	}
+
+	return metric
+}
+
+func buildBetterMetricRanks(universe []data.FundBasic, spec betterMetricSpec) map[string]betterMetricRank {
+	type rankItem struct {
+		Code  string
+		Value float64
+	}
+	items := make([]rankItem, 0, len(universe))
+	for _, basic := range universe {
+		value := spec.ValueOf(basic)
+		if value == nil {
+			continue
+		}
+		items = append(items, rankItem{Code: basic.Code, Value: *value})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Value == items[j].Value {
+			return items[i].Code < items[j].Code
+		}
+		if spec.Better == "lower" {
+			return items[i].Value < items[j].Value
+		}
+		return items[i].Value > items[j].Value
+	})
+
+	ranks := make(map[string]betterMetricRank, len(items))
+	total := len(items)
+	for idx, item := range items {
+		rank := idx + 1
+		ranks[item.Code] = betterMetricRank{
+			Rank:       rank,
+			Total:      total,
+			Percentile: calcComparablePercentile(rank, total),
+		}
+	}
+	return ranks
+}
+
+func describeBetterMetric(metric BetterFundMetric, format string) string {
+	if metric.Advantage != nil {
+		switch metric.Better {
+		case "lower":
+			return metric.Label + "更低 " + formatComparableValue(*metric.Advantage, format) + withRankSuffix(metric)
+		default:
+			return metric.Label + "更高 " + formatComparableValue(*metric.Advantage, format) + withRankSuffix(metric)
+		}
+	}
+	if metric.CandidateRank > 0 && metric.RankTotal > 0 {
+		return metric.Label + "同类第 " + strconv.Itoa(metric.CandidateRank) + "/" + strconv.Itoa(metric.RankTotal)
+	}
+	return metric.Label + "指标更稳"
+}
+
+func withRankSuffix(metric BetterFundMetric) string {
+	if metric.CandidateRank > 0 && metric.RankTotal > 0 {
+		return "，同类第 " + strconv.Itoa(metric.CandidateRank) + "/" + strconv.Itoa(metric.RankTotal)
+	}
+	return ""
+}
+
+func topStrings(items []string, limit int) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
+}
+
+func betterCategoryLabel(category string) string {
+	switch strings.TrimSpace(category) {
+	case "bond":
+		return "债基"
+	case "cash":
+		return "现金管理"
+	case "equity":
+		return "权益类"
+	default:
+		return "已更新基金池"
+	}
+}
+
+func betterSortLabel(dimension string) string {
+	switch normalizeBetterFundDimension(dimension) {
+	case "lower_drawdown":
+		return "按风险得分排序：回撤、波动、夏普，再参考近3月和近6月收益"
+	case "higher_return":
+		return "按收益得分排序：近1月、近3月、近6月、近1年收益优先，辅以夏普和回撤"
+	default:
+		return "按综合得分排序：近3月、近6月、近1年收益联动回撤、夏普和 Calmar"
+	}
+}
+
+func betterDataHint(refreshStatus FundRefreshStatus, universe betterCandidateUniverse) string {
+	hint := refreshStatus.Message
+	if strings.TrimSpace(hint) == "" {
+		hint = "推荐基于本地基金指标缓存"
+	}
+	if universe.ComparedUniverse > 0 {
+		hint += " 当前比较范围：" + universe.ScopeLabel + "，样本 " + strconv.Itoa(universe.ComparedUniverse) + " 只。"
+	}
+	return hint
+}
+
+func isReturnBetterMetric(key string) bool {
+	switch key {
+	case "growth7", "growth1", "growth3", "growth6", "growth12", "sharpe12", "calmar12":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRiskBetterMetric(key string) bool {
+	switch key {
+	case "drawdown12", "volatility12", "sharpe12", "calmar12":
+		return true
+	default:
+		return false
+	}
+}
+
+func calcComparablePercentile(rank int, total int) *float64 {
+	if rank <= 0 || total <= 0 {
+		return nil
+	}
+	value := roundPercent((float64(total-rank+1) / float64(total)) * 100)
+	return &value
+}
+
+func formatComparableValue(value float64, format string) string {
+	switch format {
+	case "ratio":
+		return strconv.FormatFloat(roundPercent(value), 'f', 2, 64)
+	default:
+		return strconv.FormatFloat(roundPercent(value), 'f', 2, 64) + "%"
+	}
+}
+
+func cloneFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
 func (s *Service) refreshSingleStockHolding(h *Holding) {
 	stockDataAPI := data.NewStockDataApi()
 	stockInfos, err := stockDataAPI.GetStockCodeRealTimeData(h.StockCode)
@@ -1094,8 +1813,18 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 	}
 
 	if trend, _, _, err := api.GetFundTrend(code); err == nil {
-		if drawdown := calcFundMaxDrawdown(trend, time.Now().AddDate(-1, 0, 0)); drawdown != nil {
-			updates["max_drawdown12"] = drawdown
+		riskSnapshot := calcFundRiskSnapshot(trend, time.Now().AddDate(-1, 0, 0))
+		if riskSnapshot.MaxDrawdown12 != nil {
+			updates["max_drawdown12"] = riskSnapshot.MaxDrawdown12
+		}
+		if riskSnapshot.Volatility12 != nil {
+			updates["volatility12"] = riskSnapshot.Volatility12
+		}
+		if riskSnapshot.Sharpe12 != nil {
+			updates["sharpe12"] = riskSnapshot.Sharpe12
+		}
+		if riskSnapshot.Calmar12 != nil {
+			updates["calmar12"] = riskSnapshot.Calmar12
 		}
 	}
 
@@ -1537,6 +2266,9 @@ func buildFundScreenerItem(basic data.FundBasic, watchlist bool) FundScreenerIte
 		NetGrowth6:        basic.NetGrowth6,
 		NetGrowth12:       basic.NetGrowth12,
 		MaxDrawdown12:     basic.MaxDrawdown12,
+		Volatility12:      basic.Volatility12,
+		Sharpe12:          basic.Sharpe12,
+		Calmar12:          basic.Calmar12,
 		ScreenUpdatedAt:   basic.ScreenUpdatedAt,
 		Watchlist:         watchlist,
 	}
@@ -1627,6 +2359,101 @@ func calcFundMaxDrawdown(points []data.FundTrendPoint, since time.Time) *float64
 
 	value := roundPercent(maxDrawdown)
 	return &value
+}
+
+func calcFundRiskSnapshot(points []data.FundTrendPoint, since time.Time) fundRiskSnapshot {
+	snapshot := fundRiskSnapshot{
+		MaxDrawdown12: calcFundMaxDrawdown(points, since),
+	}
+	if len(points) < 2 {
+		return snapshot
+	}
+
+	filtered := make([]data.FundTrendPoint, 0, len(points))
+	for _, point := range points {
+		if point.Timestamp <= 0 {
+			continue
+		}
+		if time.UnixMilli(point.Timestamp).Before(since) {
+			continue
+		}
+		filtered = append(filtered, point)
+	}
+	if len(filtered) < 2 {
+		filtered = points
+	}
+	if len(filtered) < 2 {
+		return snapshot
+	}
+
+	dailyReturns := make([]float64, 0, len(filtered)-1)
+	for i := 1; i < len(filtered); i++ {
+		if filtered[i].DailyReturn != nil {
+			dailyReturns = append(dailyReturns, *filtered[i].DailyReturn/100)
+			continue
+		}
+		prev := filtered[i-1].Value
+		if prev <= 0 {
+			continue
+		}
+		dailyReturns = append(dailyReturns, (filtered[i].Value/prev)-1)
+	}
+	if len(dailyReturns) < 2 {
+		return snapshot
+	}
+
+	dailyMean := 0.0
+	for _, item := range dailyReturns {
+		dailyMean += item
+	}
+	dailyMean /= float64(len(dailyReturns))
+
+	variance := 0.0
+	for _, item := range dailyReturns {
+		diff := item - dailyMean
+		variance += diff * diff
+	}
+	variance /= float64(len(dailyReturns) - 1)
+	if variance < 0 {
+		variance = 0
+	}
+	annualVolatility := math.Sqrt(variance) * math.Sqrt(252)
+	if annualVolatility > 0 {
+		value := roundPercent(annualVolatility * 100)
+		snapshot.Volatility12 = &value
+	}
+
+	firstValue := filtered[0].Value
+	lastValue := filtered[len(filtered)-1].Value
+	if firstValue <= 0 || lastValue <= 0 {
+		return snapshot
+	}
+	days := time.UnixMilli(filtered[len(filtered)-1].Timestamp).Sub(time.UnixMilli(filtered[0].Timestamp)).Hours() / 24
+	if days <= 0 {
+		days = float64(len(dailyReturns))
+	}
+	years := days / 365
+	if years <= 0 {
+		years = float64(len(dailyReturns)) / 252
+	}
+	if years <= 0 {
+		return snapshot
+	}
+
+	annualReturn := math.Pow(lastValue/firstValue, 1/years) - 1
+	if annualVolatility > 0 && !math.IsNaN(annualReturn) && !math.IsInf(annualReturn, 0) {
+		value := roundPercent(annualReturn / annualVolatility)
+		snapshot.Sharpe12 = &value
+	}
+	if snapshot.MaxDrawdown12 != nil && *snapshot.MaxDrawdown12 > 0 && !math.IsNaN(annualReturn) && !math.IsInf(annualReturn, 0) {
+		drawdownDecimal := *snapshot.MaxDrawdown12 / 100
+		if drawdownDecimal > 0 {
+			value := roundPercent(annualReturn / drawdownDecimal)
+			snapshot.Calmar12 = &value
+		}
+	}
+
+	return snapshot
 }
 
 func normalizeHoldingType(val string) string {

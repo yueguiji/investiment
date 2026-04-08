@@ -94,6 +94,9 @@ type FundBasic struct {
 	NetGrowthAll      *float64 `json:"netGrowthAll"`
 	NetGrowth7        *float64 `json:"netGrowth7"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`
+	Volatility12      *float64 `json:"volatility12"`
+	Sharpe12          *float64 `json:"sharpe12"`
+	Calmar12          *float64 `json:"calmar12"`
 	TopIndustry       string   `json:"topIndustry"`
 	TopIndustryWeight *float64 `json:"topIndustryWeight"`
 	TopIndustryDate   string   `json:"topIndustryDate"`

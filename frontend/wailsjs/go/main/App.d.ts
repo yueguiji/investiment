@@ -20,6 +20,8 @@ export function AddStockGroup(arg1:number,arg2:string):Promise<string>;
 
 export function AddTransaction(arg1:portfolio.Transaction):Promise<portfolio.Transaction>;
 
+export function AnalyzeBetterFundsWithAI(arg1:portfolio.BetterFundQuery,arg2:number,arg3:number):Promise<Record<string, any>>;
+
 export function AnalyzeFundCollectionWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
 
 export function AnalyzeFundWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
@@ -79,6 +81,8 @@ export function DeleteAiRecommendStocks(arg1:number):Promise<string>;
 export function DeleteAllStockInfo(arg1:number):Promise<string>;
 
 export function DeleteAsset(arg1:number):Promise<boolean>;
+
+export function DeleteFundWatchGroup(arg1:string):Promise<string>;
 
 export function DeleteHolding(arg1:number):Promise<boolean>;
 
@@ -275,6 +279,8 @@ export function RefreshFundScreenerData(arg1:number):Promise<Record<string, any>
 export function RemoveGroup(arg1:number):Promise<string>;
 
 export function RemoveStockGroup(arg1:string,arg2:string,arg3:number):Promise<string>;
+
+export function RenameFundWatchGroup(arg1:string,arg2:string):Promise<string>;
 
 export function RunHouseholdAIAnalysis(arg1:string,arg2:number,arg3:number,arg4:string):Promise<Record<string, any>>;
 

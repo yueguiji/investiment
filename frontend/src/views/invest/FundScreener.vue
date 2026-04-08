@@ -58,10 +58,69 @@ const orderOptions = [
   { label: '从低到高', value: 'asc' }
 ]
 
+const refreshButtonLabel = computed(() => {
+  if (refreshStatus.value?.refreshing) return '后台全量更新中'
+  return '手动全量更新'
+})
+
+const pendingRefreshButtonLabel = computed(() => {
+  if (refreshStatus.value?.refreshing) return '后台补齐今日更新中'
+  return '补齐今日更新'
+})
+
+const refreshScopeLabel = computed(() => (
+  refreshStatus.value?.scope === 'all_pending' ? '全部基金' : '自选相关基金'
+))
+
+const focusedRefreshButtonLabel = computed(() => {
+  if (refreshStatus.value?.refreshing && refreshStatus.value?.scope === 'watchlist_related') return '后台自选相关更新中'
+  return '自选相关更新'
+})
+
+const fullRefreshButtonLabel = computed(() => {
+  if (refreshStatus.value?.refreshing && refreshStatus.value?.scope === 'all_pending') return '后台全部更新中'
+  return '全部更新'
+})
+
+const effectiveRefreshBannerHeading = computed(() => {
+  const status = refreshStatus.value
+  if (!status) return ''
+  if (status.scope === 'all_pending' && status.refreshing) return '今日基金全量更新中'
+  if ((status.targetCount || 0) <= 0) return '暂无自选相关基金'
+  if (status.state === 'completed') return `今日${refreshScopeLabel.value}已完成`
+  if (status.state === 'partial') return `今日${refreshScopeLabel.value}部分更新`
+  return `今日${refreshScopeLabel.value}未开始`
+})
+
+const effectiveRefreshBannerCopy = computed(() => {
+  const status = refreshStatus.value
+  if (!status) return ''
+  if ((status.targetCount || 0) <= 0 && !status.refreshing) {
+    return '当前还没有自选或持仓基金，默认日更不会启动。你仍然可以手动点“全部更新”补齐全市场基金指标。'
+  }
+  if (status.refreshing) {
+    const progress = status.progressTotal > 0 ? `${status.progressCurrent}/${status.progressTotal}` : '准备中'
+    const current = status.currentCode ? `，当前：${status.currentCode}` : ''
+    if (status.scope === 'all_pending') {
+      return `后台正在执行全部更新，今日已更新 ${status.updatedToday}/${status.universeCount} 只基金，当前进度 ${progress}${current}。你现在看到的是本地缓存结果，剩余基金补齐后会更完整。`
+    }
+    return `后台正在执行自选相关更新，今日已更新 ${status.targetUpdated}/${status.targetCount} 只相关基金，当前进度 ${progress}${current}。范围包含自选基金、持仓基金，以及基于自选基金筛出的推荐候选。`
+  }
+  if (status.state === 'partial') {
+    return `今天只更新了 ${status.targetUpdated}/${status.targetCount} 只${refreshScopeLabel.value}，其余仍显示旧缓存或空值。最近一次指标更新时间：${status.lastRefreshHint || '暂无'}。`
+  }
+  if (status.state === 'completed') {
+    return `今天已完成 ${status.targetUpdated}/${status.targetCount} 只${refreshScopeLabel.value}更新，可以直接看自选、持仓和推荐。最近一次指标更新时间：${status.lastRefreshHint || '今日已完成'}。`
+  }
+  return '今天还没有开始更新自选相关基金。首次进入会自动在后台补齐自选、持仓和推荐候选；如果你想补全全市场，再手动点“全部更新”。'
+})
+
 const refreshBannerType = computed(() => {
   if (refreshStatus.value?.refreshing) return 'warning'
-  if (refreshStatus.value?.needsRefresh) return 'info'
-  return 'success'
+  if ((refreshStatus.value?.targetCount || 0) <= 0) return 'info'
+  if (refreshStatus.value?.state === 'partial') return 'warning'
+  if (refreshStatus.value?.state === 'completed') return 'success'
+  return 'info'
 })
 
 const refreshBannerTitle = computed(() => {
@@ -83,6 +142,29 @@ const refreshBannerText = computed(() => {
   }
   const latest = status.lastRefreshHint || '今日已更新'
   return `可以直接筛选，最近一次指标更新时间：${latest}`
+})
+
+const refreshBannerHeading = computed(() => {
+  if (refreshStatus.value?.state === 'completed') return '今日基金指标今日完成'
+  if (refreshStatus.value?.state === 'partial') return '今日基金指标部分更新'
+  return '今日基金指标未开始'
+})
+
+const refreshBannerCopy = computed(() => {
+  const status = refreshStatus.value
+  if (!status) return ''
+  if (status.refreshing) {
+    const progress = status.progressTotal > 0 ? `${status.progressCurrent}/${status.progressTotal}` : '准备中'
+    const current = status.currentCode ? `，当前：${status.currentCode}` : ''
+    return `后台正在执行全量更新，今日已更新 ${status.updatedToday}/${status.universeCount} 只基金，当前进度 ${progress}${current}。你现在看到的是本地缓存结果，剩余基金补齐后会更完整。`
+  }
+  if (status.state === 'partial') {
+    return `今天只更新了 ${status.updatedToday}/${status.universeCount} 只基金，其余基金仍显示旧缓存或空值。最近一次指标更新时间：${status.lastRefreshHint || '暂无'}。`
+  }
+  if (status.state === 'completed') {
+    return `今天已完成 ${status.updatedToday}/${status.universeCount} 只基金指标更新，可以直接筛选。最近一次指标更新时间：${status.lastRefreshHint || '今日已完成'}。`
+  }
+  return '今天还没有开始刷新基金池指标。首次进入会自动在后台启动全量更新，手动刷新也会继续补齐全部基金。'
 })
 
 function percentText(value) {
@@ -117,6 +199,18 @@ function percentType(value, reverse = false) {
 
 function syncRefreshStatus(status, silent = false) {
   refreshStatus.value = status || null
+  if (status?.triggered && !silent) {
+    if (status?.scope === 'all_pending') {
+      message.info('已启动基金池后台全部更新，筛选结果会随着进度逐步变新。')
+    } else {
+      message.info('已启动自选相关基金后台更新，筛选和推荐会先覆盖你关心的基金。')
+    }
+    silent = true
+  }
+  if (status?.triggered && !silent) {
+    message.info('已启动基金池后台全量更新，筛选结果会随着进度逐步变新。')
+    silent = true
+  }
   if (status?.triggered && !silent) {
     message.info('今日首次进入已自动启动基金池后台更新。')
   }
@@ -159,6 +253,21 @@ async function loadData(resetPage = false, silent = false) {
     if (!silent) {
       message.error('基金筛选加载失败')
     }
+    if (false) {
+    message.error('手动全量更新基金池指标失败')
+    return
+    if (!silent) {
+      message.error('基金筛选加载失败')
+    }
+    return
+    message.error('手动全量更新基金池指标失败')
+    return
+    message.error('手动全量更新基金池指标失败')
+    return
+    if (!silent) {
+      message.error('基金筛选加载失败')
+    }
+    }
   } finally {
     if (!silent) {
       loading.value = false
@@ -180,10 +289,57 @@ function stopPolling() {
   }
 }
 
+async function runRefresh(scope) {
+  refreshing.value = true
+  try {
+    const result = await RefreshFundScreenerData(scope === 'all' ? -1 : 0)
+    syncRefreshStatus(result?.refreshStatus, true)
+    if (result?.refreshStatus?.refreshing && result?.started) {
+      if (scope === 'all') {
+        message.success(`已启动后台全部更新，剩余 ${result?.refreshStatus?.targetPending || 0} 只基金会逐步补齐。`)
+      } else {
+        message.success(`已启动后台自选相关更新，范围会覆盖自选、持仓以及推荐候选，共 ${result?.refreshStatus?.targetCount || 0} 只基金。`)
+      }
+    } else if (result?.refreshStatus?.refreshing) {
+      message.info(scope === 'all' ? '后台全部更新已经在进行中。' : '后台自选相关更新已经在进行中。')
+    } else if (result?.refreshStatus?.state === 'completed') {
+      message.success(scope === 'all' ? '今日全市场基金指标已经补齐。' : '今日自选相关基金已经全部完成。')
+    } else {
+      message.info(scope === 'all' ? '已接收全部更新请求，页面会继续轮询后台进度。' : '已接收自选相关更新请求，页面会继续轮询后台进度。')
+    }
+    await loadData(false, true)
+  } catch (error) {
+    console.error(error)
+    message.error(scope === 'all' ? '全部更新基金池指标失败' : '自选相关基金更新失败')
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function handleFocusedRefresh() {
+  await runRefresh('focused')
+}
+
+async function handleFullRefresh() {
+  await runRefresh('all')
+}
+
 async function handleRefreshMetrics() {
   refreshing.value = true
   try {
-    const result = await RefreshFundScreenerData(300)
+    const result = await RefreshFundScreenerData(0)
+    syncRefreshStatus(result?.refreshStatus, true)
+    if (result?.refreshStatus?.refreshing && result?.started) {
+      message.success(`已启动后台全量更新，本次会尽量补齐全部 ${result?.universeCount || universeCount.value || 0} 只基金的今日指标。`)
+    } else if (result?.refreshStatus?.refreshing) {
+      message.info('后台全量更新已经在进行中，继续等待进度推进即可。')
+    } else if (result?.refreshStatus?.state === 'completed') {
+      message.success('今日基金指标已经全部完成，不需要再手动补刷。')
+    } else {
+      message.info('已接收手动全量更新请求，页面会继续轮询后台进度。')
+    }
+    await loadData(false, true)
+    return
     message.success(`已增量更新 ${result?.refreshed || 0} 只基金指标`)
     await loadData(false)
   } catch (error) {
@@ -252,6 +408,66 @@ async function handleDetailRefreshed() {
   await loadData(false, true)
 }
 
+function renderSortableTitle(label, sortKey, defaultOrder = 'desc') {
+  const active = filter.sortBy === sortKey
+  const order = active ? filter.sortOrder : defaultOrder
+  return h(
+    'span',
+    {
+      role: 'button',
+      tabindex: 0,
+      'aria-label': `${label}排序`,
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        color: active ? '#eef5ff' : 'inherit',
+        font: 'inherit',
+        lineHeight: 1,
+        whiteSpace: 'nowrap'
+      },
+      onClick: (event) => {
+        event.stopPropagation()
+        toggleScreenerSort(sortKey, defaultOrder)
+      },
+      onKeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggleScreenerSort(sortKey, defaultOrder)
+        }
+      }
+    },
+    [
+      h('span', null, label),
+      h(
+        'span',
+        {
+          'aria-hidden': 'true',
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontSize: '11px',
+            color: active ? 'var(--primary-color)' : 'rgba(222, 234, 255, 0.42)'
+          }
+        },
+        order === 'asc' ? '↑' : '↓'
+      )
+    ]
+  )
+}
+
+function toggleScreenerSort(sortKey, defaultOrder = 'desc') {
+  if (filter.sortBy === sortKey) {
+    filter.sortOrder = filter.sortOrder === 'desc' ? 'asc' : 'desc'
+  } else {
+    filter.sortBy = sortKey
+    filter.sortOrder = defaultOrder
+  }
+  loadData(true)
+}
+
 const columns = computed(() => [
   {
     title: '基金',
@@ -287,7 +503,7 @@ const columns = computed(() => [
     }
   },
   {
-    title: '近7天',
+    title: () => renderSortableTitle('近7天', 'growth7', 'desc'),
     key: 'netGrowth7',
     width: 110,
     render(row) {
@@ -295,7 +511,7 @@ const columns = computed(() => [
     }
   },
   {
-    title: '近1月',
+    title: () => renderSortableTitle('近1月', 'growth1', 'desc'),
     key: 'netGrowth1',
     width: 110,
     render(row) {
@@ -303,7 +519,7 @@ const columns = computed(() => [
     }
   },
   {
-    title: '近3月',
+    title: () => renderSortableTitle('近3月', 'growth3', 'desc'),
     key: 'netGrowth3',
     width: 110,
     render(row) {
@@ -311,7 +527,7 @@ const columns = computed(() => [
     }
   },
   {
-    title: '近1年最大回撤',
+    title: () => renderSortableTitle('近1年最大回撤', 'drawdown12', 'asc'),
     key: 'maxDrawdown12',
     width: 140,
     render(row) {
@@ -319,7 +535,7 @@ const columns = computed(() => [
     }
   },
   {
-    title: '更新时间',
+    title: () => renderSortableTitle('更新时间', 'updatedAt', 'desc'),
     key: 'screenUpdatedAt',
     width: 160,
     render(row) {
@@ -375,8 +591,8 @@ onBeforeUnmount(() => {
       subtitle="按类型、阶段收益、回撤和行业快速筛出适合自己复盘的基金池"
     />
 
-    <n-alert v-if="refreshStatus" :type="refreshBannerType" :title="refreshBannerTitle" class="status-alert" show-icon>
-      {{ refreshBannerText }}
+    <n-alert v-if="refreshStatus" :type="refreshBannerType" :title="effectiveRefreshBannerHeading" class="status-alert" show-icon>
+      {{ effectiveRefreshBannerCopy }}
     </n-alert>
 
     <div class="platform-card stats-shell">
@@ -393,7 +609,22 @@ onBeforeUnmount(() => {
         <div class="stat-label">最近一次指标更新时间</div>
       </div>
       <div class="stat-actions">
-        <n-button :loading="refreshing" @click="handleRefreshMetrics">增量更新指标</n-button>
+        <n-button
+          type="primary"
+          :loading="refreshing && refreshStatus?.scope === 'watchlist_related'"
+          :disabled="refreshStatus?.refreshing"
+          @click="handleFocusedRefresh"
+        >
+          {{ focusedRefreshButtonLabel }}
+        </n-button>
+        <n-button
+          tertiary
+          :loading="refreshing && refreshStatus?.scope === 'all_pending'"
+          :disabled="refreshStatus?.refreshing"
+          @click="handleFullRefresh"
+        >
+          {{ fullRefreshButtonLabel }}
+        </n-button>
       </div>
     </div>
 
@@ -440,7 +671,7 @@ onBeforeUnmount(() => {
 
       <div class="filter-foot">
         <n-checkbox v-model:checked="filter.onlyWatchlist">只看基金自选</n-checkbox>
-        <span class="filter-note">基金池保存在本地数据库，进入页面时会自动检查是否需要做今日更新。</span>
+        <span class="filter-note">默认只会自动补齐自选、持仓和推荐候选；如果你想刷新整个基金池，再手动点“全部更新”。</span>
       </div>
     </div>
 
@@ -527,6 +758,8 @@ onBeforeUnmount(() => {
 .stat-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .filter-shell {

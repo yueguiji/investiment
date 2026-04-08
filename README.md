@@ -203,6 +203,13 @@ Build:
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1
 ```
 
+Tagged GitHub releases publish:
+
+- `investment-platform-<tag>-windows-amd64.exe`
+- `investment-platform-<tag>-windows-amd64.zip`
+- `investment-platform-<tag>-macos-universal.zip`
+- `investment-platform-<tag>-macos-universal.tar.gz`
+
 For runtime override details, see:
 
 - [docs/runtime-configuration.md](docs/runtime-configuration.md)

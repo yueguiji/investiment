@@ -1,0 +1,70 @@
+name: Release macOS Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-fund --no-audit
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build macOS app
+        run: |
+          wails build -clean -platform darwin/universal
+
+      - name: Prepare release assets
+        run: |
+          tag="${{ github.ref_name }}"
+          app_name="investment-platform.app"
+          built_app="$PWD/build/bin/$app_name"
+          release_dir="$PWD/release-assets"
+
+          if [ ! -d "$built_app" ]; then
+            echo "Built app bundle not found: $built_app"
+            exit 1
+          fi
+
+          mkdir -p "$release_dir"
+
+          zip_path="$release_dir/investment-platform-$tag-macos-universal.zip"
+          tar_path="$release_dir/investment-platform-$tag-macos-universal.tar.gz"
+
+          ditto -c -k --sequesterRsrc --keepParent "$built_app" "$zip_path"
+          tar -C "$PWD/build/bin" -czf "$tar_path" "$app_name"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: false
+          files: |
+            release-assets/investment-platform-*-macos-universal.zip
+            release-assets/investment-platform-*-macos-universal.tar.gz

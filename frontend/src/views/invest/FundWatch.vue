@@ -41,19 +41,21 @@
             :tab="tab.label"
           />
         </n-tabs>
+      </div>
+    </div>
+
+    <div class="platform-card table-shell">
+      <div class="table-toolbar">
         <n-space>
           <n-button v-if="activeCustomGroup" size="small" @click="openRenameGroup">重命名</n-button>
           <n-button v-if="activeCustomGroup" size="small" type="error" ghost @click="handleDeleteGroup">删除页签</n-button>
           <n-button size="small" @click="openCreateGroup">新建页签</n-button>
         </n-space>
       </div>
-    </div>
-
-    <div class="platform-card table-shell">
       <n-data-table
         :loading="loading"
         :columns="columns"
-        :data="filteredRows"
+        :data="sortedRows"
         :pagination="{ pageSize: 10 }"
         :scroll-x="1520"
         :row-key="(row) => row.code"
@@ -83,6 +85,16 @@
       title="基金自选 AI 分析"
     />
 
+    <FundAIAnalysisModal
+      v-model:show="showBetterAI"
+      mode="better"
+      :better-reference-code="betterReferenceCode"
+      :better-dimension="betterDimension"
+      :same-type-only="sameTypeOnly"
+      :better-top-n="3"
+      :title="betterAITitle"
+    />
+
     <FundCompareModal
       v-model:show="showCompareModal"
       :codes="checkedRowKeys"
@@ -95,7 +107,14 @@
       style="width: 420px;"
     >
       <n-space vertical size="large">
+        <n-select
+          v-if="groupModalMode === 'assign'"
+          v-model:value="assignGroupValue"
+          :options="groupSelectOptions"
+          placeholder="选择一个页签"
+        />
         <n-input
+          v-else
           v-model:value="editingGroupName"
           placeholder="例如：核心债基 / 进攻观察 / 长期定投"
           @keydown.enter.prevent="saveGroup"
@@ -119,8 +138,27 @@
       style="width: 1380px; max-width: calc(100vw - 32px);"
     >
       <div class="better-toolbar">
-        <n-checkbox v-model:checked="sameTypeOnly">只看同类型</n-checkbox>
-        <n-button :loading="betterLoading" @click="loadBetterFunds">重新筛选</n-button>
+        <div class="better-toolbar-left">
+          <n-checkbox v-model:checked="sameTypeOnly">只看同类型</n-checkbox>
+          <n-text depth="3">当前栏目支持直接对 Top3 推荐基金做 AI 对比分析。</n-text>
+        </div>
+        <div class="better-toolbar-right">
+          <n-button :disabled="!betterRows.length || betterLoading" @click="openBetterAI">
+            AI分析{{ currentBetterDimensionLabel }}Top3
+          </n-button>
+          <n-button :loading="betterLoading" @click="loadBetterFunds">重新筛选</n-button>
+        </div>
+      </div>
+      <div v-if="betterResult" class="better-context" :class="{ warning: betterResult.fallbackApplied }">
+        <div class="better-context-head">
+          <div class="better-context-title">{{ betterResult.sortLabel || '按推荐得分排序' }}</div>
+          <div class="better-context-meta">
+            <span>{{ betterResult.scopeLabel || '基金池对比' }}</span>
+            <span>样本 {{ betterResult.comparedUniverse || 0 }} 只</span>
+            <span>更新时间 {{ betterResult.refreshStatus?.lastRefreshHint || '本地缓存' }}</span>
+          </div>
+        </div>
+        <div class="better-context-hint">{{ betterResult.dataHint || '推荐基于本地基金指标缓存。' }}</div>
       </div>
       <n-tabs v-model:value="betterDimension" type="segment" animated @update:value="loadBetterFunds">
         <n-tab name="lower_drawdown" tab="回撤更低" />
@@ -133,7 +171,7 @@
           :columns="betterColumns"
           :data="betterRows"
           :pagination="{ pageSize: 8 }"
-          :scroll-x="1360"
+          :scroll-x="1600"
         />
       </div>
     </n-modal>
@@ -158,11 +196,12 @@ const activeFund = ref(null)
 const showDetail = ref(false)
 const showSingleAI = ref(false)
 const showCollectionAI = ref(false)
+const showBetterAI = ref(false)
 const showBetterModal = ref(false)
 const betterLoading = ref(false)
 const sameTypeOnly = ref(false)
 const betterDimension = ref('balanced')
-const betterRows = ref([])
+const betterResult = ref(null)
 const checkedRowKeys = ref([])
 const showCompareModal = ref(false)
 const activeGroupTab = ref('__all__')
@@ -174,6 +213,10 @@ const groupModalMode = ref('create')
 const editingGroupSource = ref('')
 
 const betterReferenceCode = ref('')
+const watchSortState = ref({
+  key: '',
+  order: 'desc'
+})
 const ALL_GROUP_TAB = '__all__'
 const UNGROUPED_GROUP_TAB = '__ungrouped__'
 const CUSTOM_GROUP_STORAGE_KEY = 'fund-watch-custom-groups'
@@ -184,21 +227,44 @@ const groupNames = computed(() => Array.from(new Set([
   ...rows.value.map((row) => String(row.watchGroup || '').trim()).filter(Boolean)
 ])))
 
-const watchTabs = computed(() => {
+const groupCounts = computed(() => {
   const counts = new Map()
-  let ungroupedCount = 0
   for (const row of rows.value) {
     const group = String(row.watchGroup || '').trim()
     if (group) {
       counts.set(group, (counts.get(group) || 0) + 1)
-    } else {
+    }
+  }
+  return counts
+})
+
+const groupSelectOptions = computed(() => [
+  { label: '未分组', value: UNGROUPED_GROUP_TAB },
+  ...groupNames.value.map((group) => ({
+    label: `${group} (${groupCounts.value.get(group) || 0})`,
+    value: group
+  }))
+])
+
+const assignGroupValue = computed({
+  get: () => editingGroupName.value || UNGROUPED_GROUP_TAB,
+  set: (value) => {
+    editingGroupName.value = value === UNGROUPED_GROUP_TAB ? '' : String(value || '').trim()
+  }
+})
+
+const watchTabs = computed(() => {
+  let ungroupedCount = 0
+  for (const row of rows.value) {
+    const group = String(row.watchGroup || '').trim()
+    if (!group) {
       ungroupedCount += 1
     }
   }
 
   return [
     { label: `全部 (${rows.value.length})`, value: ALL_GROUP_TAB },
-    ...groupNames.value.map((group) => ({ label: `${group} (${counts.get(group) || 0})`, value: group })),
+    ...groupNames.value.map((group) => ({ label: `${group} (${groupCounts.value.get(group) || 0})`, value: group })),
     { label: `未分组 (${ungroupedCount})`, value: UNGROUPED_GROUP_TAB }
   ]
 })
@@ -210,11 +276,35 @@ const filteredRows = computed(() => {
   }
   return rows.value.filter((row) => String(row.watchGroup || '').trim() === activeGroupTab.value)
 })
+const sortedRows = computed(() => {
+  const list = [...filteredRows.value]
+  const { key, order } = watchSortState.value
+  if (!key) {
+    return list
+  }
+  return list.sort((left, right) => compareNullableValues(
+    getWatchSortValue(left, key),
+    getWatchSortValue(right, key),
+    order
+  ))
+})
 
 const betterTitle = computed(() => {
   const name = activeFund.value?.name || activeFund.value?.stockName || activeFund.value?.code || activeFund.value?.stockCode || '当前基金'
   return name + ' 的对比推荐'
 })
+const currentBetterDimensionLabel = computed(() => {
+  switch (betterDimension.value) {
+    case 'lower_drawdown':
+      return '回撤更低'
+    case 'higher_return':
+      return '收益更高'
+    default:
+      return '实力均衡更优'
+  }
+})
+const betterAITitle = computed(() => `${betterTitle.value} · ${currentBetterDimensionLabel.value} Top3 AI分析`)
+const betterRows = computed(() => betterResult.value?.candidates || [])
 const activeCustomGroup = computed(() => isCustomGroupTab(activeGroupTab.value) ? activeGroupTab.value : '')
 const activeCustomGroupRows = computed(() => rows.value.filter((row) => String(row.watchGroup || '').trim() === activeCustomGroup.value))
 const groupModalTitle = computed(() => {
@@ -223,7 +313,7 @@ const groupModalTitle = computed(() => {
   return '新建自定义页签'
 })
 const groupModalHint = computed(() => {
-  if (groupModalMode.value === 'assign') return '留空表示移出自定义页签，进入“未分组”。'
+  if (groupModalMode.value === 'assign') return '直接选择已有页签；选“未分组”会把基金移出自定义页签。'
   if (groupModalMode.value === 'rename') return '重命名后，这个页签下的基金会一起迁移到新名称。'
   return '先建一个分组页签，后面可以把基金归进去。'
 })
@@ -232,6 +322,92 @@ const groupModalActionText = computed(() => {
   if (groupModalMode.value === 'create') return '创建'
   return '保存'
 })
+
+function renderSortableTitle(label, sortKey, defaultOrder = 'desc') {
+  const active = watchSortState.value.key === sortKey
+  const order = active ? watchSortState.value.order : defaultOrder
+  return h(
+    'span',
+    {
+      role: 'button',
+      tabindex: 0,
+      'aria-label': `${label}排序`,
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        color: active ? '#eef5ff' : 'inherit',
+        font: 'inherit',
+        lineHeight: 1,
+        whiteSpace: 'nowrap'
+      },
+      onClick: (event) => {
+        event.stopPropagation()
+        toggleWatchSort(sortKey)
+      },
+      onKeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggleWatchSort(sortKey)
+        }
+      }
+    },
+    [
+      h('span', null, label),
+      h(
+        'span',
+        {
+          'aria-hidden': 'true',
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontSize: '11px',
+            color: active ? 'var(--primary-color)' : 'rgba(222, 234, 255, 0.42)'
+          }
+        },
+        order === 'asc' ? '↑' : '↓'
+      )
+    ]
+  )
+}
+
+function toggleWatchSort(sortKey) {
+  if (watchSortState.value.key === sortKey) {
+    watchSortState.value.order = watchSortState.value.order === 'desc' ? 'asc' : 'desc'
+    return
+  }
+  watchSortState.value = {
+    key: sortKey,
+    order: 'desc'
+  }
+}
+
+function getWatchSortValue(row, sortKey) {
+  switch (sortKey) {
+    case 'estimate':
+      return row.netEstimatedRate ?? row.latestDailyRate ?? null
+    case 'netGrowth1':
+      return row.fundBasic?.netGrowth1
+    case 'netGrowth3':
+      return row.fundBasic?.netGrowth3
+    case 'netGrowth6':
+      return row.fundBasic?.netGrowth6
+    default:
+      return null
+  }
+}
+
+function compareNullableValues(left, right, order = 'desc') {
+  const leftMissing = left === null || left === undefined || Number.isNaN(Number(left))
+  const rightMissing = right === null || right === undefined || Number.isNaN(Number(right))
+  if (leftMissing && rightMissing) return 0
+  if (leftMissing) return 1
+  if (rightMissing) return -1
+  const diff = Number(left) - Number(right)
+  return order === 'asc' ? diff : -diff
+}
 
 const columns = [
   {
@@ -256,6 +432,7 @@ const columns = [
   },
   {
     title: '估算 / 最近1日',
+    title: () => renderSortableTitle('估算 / 最近1日', 'estimate'),
     key: 'estimate',
     width: 180,
     render: (row) => h('div', { class: 'cell-stack' }, [
@@ -274,19 +451,19 @@ const columns = [
     ])
   },
   {
-    title: '近1月',
+    title: () => renderSortableTitle('近1月', 'netGrowth1'),
     key: 'netGrowth1',
     width: 100,
     render: (row) => renderPercent(row.fundBasic?.netGrowth1)
   },
   {
-    title: '近3月',
+    title: () => renderSortableTitle('近3月', 'netGrowth3'),
     key: 'netGrowth3',
     width: 100,
     render: (row) => renderPercent(row.fundBasic?.netGrowth3)
   },
   {
-    title: '近6月',
+    title: () => renderSortableTitle('近6月', 'netGrowth6'),
     key: 'netGrowth6',
     width: 100,
     render: (row) => renderPercent(row.fundBasic?.netGrowth6)
@@ -304,62 +481,173 @@ const columns = [
   }
 ]
 
-const betterColumns = [
+const betterColumns = computed(() => [
+  {
+    title: '排序',
+    key: 'recommendationRank',
+    width: 100,
+    render: (row) => h('div', { class: 'better-order' }, [
+      h('strong', { class: 'better-order-rank' }, `#${row.recommendationRank || '-'}`),
+      h('div', { class: 'cell-meta' }, `得分 ${formatBetterScore(row.betterScore)}`)
+    ])
+  },
   {
     title: '候选基金',
     key: 'name',
-    width: 220,
+    width: 260,
     render: (row) => h('div', { class: 'cell-main' }, [
       h(NButton, { text: true, type: 'primary', onClick: () => openExternal(row.code) }, () => row.name || row.code),
-      h('div', { class: 'cell-meta' }, row.code)
+      h('div', { class: 'cell-meta' }, row.code),
+      h('div', { class: 'better-tag-row' }, [
+        h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => row.categoryLabel || row.fundType || '基金' }),
+        h('span', { class: 'cell-meta' }, row.fundType || '-')
+      ])
     ])
   },
   {
-    title: '类型',
-    key: 'fundType',
-    width: 180,
-    render: (row) => h('div', { class: 'cell-stack' }, [
-      h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => row.categoryLabel || row.fundType || '基金' }),
-      h('div', { class: 'cell-meta' }, row.fundType || '-')
-    ])
+    title: '关键对比',
+    key: 'comparison',
+    width: 430,
+    render: (row) => renderBetterComparisonCell(row, betterMetricKeys())
   },
   {
-    title: '近7天',
-    key: 'netGrowth7',
-    width: 90,
-    render: (row) => renderPercent(row.netGrowth7)
+    title: '同类位置',
+    key: 'peerRanks',
+    width: 280,
+    render: (row) => renderBetterRankCell(row, betterMetricKeys())
   },
   {
-    title: '近1月',
-    key: 'netGrowth1',
-    width: 90,
-    render: (row) => renderPercent(row.netGrowth1)
-  },
-  {
-    title: '近3月',
-    key: 'netGrowth3',
-    width: 90,
-    render: (row) => renderPercent(row.netGrowth3)
-  },
-  {
-    title: '近6月',
-    key: 'netGrowth6',
-    width: 90,
-    render: (row) => renderPercent(row.netGrowth6)
-  },
-  {
-    title: '回撤',
-    key: 'maxDrawdown12',
-    width: 90,
-    render: (row) => row.maxDrawdown12 == null ? '-' : Number(row.maxDrawdown12).toFixed(2) + '%'
-  },
-  {
-    title: '更优原因',
+    title: '采纳理由',
     key: 'reasons',
-    width: 320,
-    render: (row) => h('div', { class: 'better-reasons' }, (row.reasons || []).join(' / ') || '-')
+    width: 380,
+    render: (row) => renderBetterReasonCell(row)
   }
-]
+])
+
+function betterMetricKeys() {
+  switch (betterDimension.value) {
+    case 'lower_drawdown':
+      return ['drawdown12', 'volatility12', 'sharpe12', 'growth6']
+    case 'higher_return':
+      return ['growth3', 'growth6', 'growth12', 'sharpe12', 'drawdown12']
+    default:
+      return ['growth6', 'growth12', 'drawdown12', 'sharpe12', 'calmar12']
+  }
+}
+
+function findBetterMetric(row, key) {
+  return (row?.metrics || []).find((item) => item?.key === key) || null
+}
+
+function betterMetricLabel(key) {
+  switch (key) {
+    case 'growth7': return '近7天'
+    case 'growth1': return '近1月'
+    case 'growth3': return '近3月'
+    case 'growth6': return '近6月'
+    case 'growth12': return '近1年'
+    case 'drawdown12': return '近1年最大回撤'
+    case 'volatility12': return '近1年波动'
+    case 'sharpe12': return '近1年夏普'
+    case 'calmar12': return 'Calmar'
+    default: return key
+  }
+}
+
+function isRatioMetric(key) {
+  return key === 'sharpe12' || key === 'calmar12'
+}
+
+function isLowerBetterMetric(key) {
+  return key === 'drawdown12' || key === 'volatility12'
+}
+
+function formatMetricValue(value, key) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  const num = Number(value)
+  if (isRatioMetric(key)) {
+    return num.toFixed(2)
+  }
+  if (isLowerBetterMetric(key)) {
+    return `${num.toFixed(2)}%`
+  }
+  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`
+}
+
+function formatBetterScore(value) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return Number(value).toFixed(2)
+}
+
+function metricTone(metric, key) {
+  if (!metric) return ''
+  if (metric.advantage != null && Number(metric.advantage) > 0) {
+    return 'profit-text'
+  }
+  if (metric.delta == null) {
+    return ''
+  }
+  const delta = Number(metric.delta)
+  const better = isLowerBetterMetric(key) ? delta < 0 : delta > 0
+  return better ? 'profit-text' : 'loss-text'
+}
+
+function metricSupportText(metric, key) {
+  if (!metric) return '暂无数据'
+  const parts = []
+  if (metric.advantage != null && Number(metric.advantage) > 0) {
+    parts.push(`${isLowerBetterMetric(key) ? '改善' : '领先'} ${formatMetricValue(metric.advantage, key)}`)
+  }
+  if (metric.candidateRank && metric.rankTotal) {
+    const rankText = metric.referenceRank
+      ? `候选 ${metric.candidateRank}/${metric.rankTotal} · 当前 ${metric.referenceRank}/${metric.rankTotal}`
+      : `候选 ${metric.candidateRank}/${metric.rankTotal}`
+    parts.push(rankText)
+  }
+  return parts.join(' · ') || '暂无明显优势'
+}
+
+function renderBetterComparisonCell(row, keys) {
+  return h('div', { class: 'better-metric-list' }, keys.map((key) => {
+    const metric = findBetterMetric(row, key)
+    return h('div', { class: 'better-metric-row', key }, [
+      h('div', { class: 'better-metric-head' }, [
+        h('span', { class: 'better-metric-label' }, metric?.label || betterMetricLabel(key)),
+        h('strong', { class: metricTone(metric, key) }, metric ? `${formatMetricValue(metric.candidateValue, key)} vs ${formatMetricValue(metric.referenceValue, key)}` : '-')
+      ]),
+      h('div', { class: 'better-metric-sub muted' }, metricSupportText(metric, key))
+    ])
+  }))
+}
+
+function renderBetterRankCell(row, keys) {
+  return h('div', { class: 'better-rank-list' }, keys.slice(0, 4).map((key) => {
+    const metric = findBetterMetric(row, key)
+    const label = metric?.label || betterMetricLabel(key)
+    const value = metric?.candidateRank && metric?.rankTotal
+      ? `第 ${metric.candidateRank}/${metric.rankTotal}`
+      : '暂无排名'
+    const compare = metric?.referenceRank && metric?.rankTotal
+      ? `当前 ${metric.referenceRank}/${metric.rankTotal}`
+      : ''
+    return h('div', { class: 'better-rank-row', key }, [
+      h('span', { class: 'better-rank-label' }, label),
+      h('span', { class: 'better-rank-value' }, value),
+      compare ? h('span', { class: 'better-rank-compare muted' }, compare) : null
+    ])
+  }))
+}
+
+function renderBetterReasonCell(row) {
+  return h('div', { class: 'better-reason-card' }, [
+    h('div', { class: 'better-reason-summary' }, row.reasonSummary || (row.reasons || []).join(' / ') || '-'),
+    h('div', { class: 'better-reason-meta muted' }, `${row.scopeLabel || '基金池对比'} · 综合分 ${formatBetterScore(row.betterScore)}`)
+  ])
+}
 
 function renderPercent(value) {
   if (value === null || value === undefined) {
@@ -612,10 +900,19 @@ function openSingleAI(row) {
 function openBetter(row) {
   activeFund.value = normalizeWatchFund(row)
   betterReferenceCode.value = row.code
-  sameTypeOnly.value = false
+  sameTypeOnly.value = true
   betterDimension.value = 'balanced'
+   showBetterAI.value = false
   showBetterModal.value = true
   loadBetterFunds()
+}
+
+function openBetterAI() {
+  if (!betterReferenceCode.value || !betterRows.value.length) {
+    message.warning('当前栏目还没有可供分析的推荐基金')
+    return
+  }
+  showBetterAI.value = true
 }
 
 async function loadBetterFunds() {
@@ -629,9 +926,10 @@ async function loadBetterFunds() {
       page: 1,
       pageSize: 12
     })
-    betterRows.value = result?.candidates || []
+    betterResult.value = result || null
   } catch (error) {
     console.error(error)
+    betterResult.value = null
     message.error('对比推荐筛选失败')
   } finally {
     betterLoading.value = false
@@ -727,6 +1025,12 @@ watch(sameTypeOnly, () => {
   }
 })
 
+watch(showBetterModal, (show) => {
+  if (!show) {
+    showBetterAI.value = false
+  }
+})
+
 watch(showGroupModal, (show) => {
   if (!show) resetGroupModal()
 })
@@ -754,9 +1058,15 @@ watch(watchTabs, (tabs) => {
 .watch-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
 .cell-main,
@@ -778,6 +1088,14 @@ watch(watchTabs, (tabs) => {
   flex-wrap: wrap;
 }
 
+.better-toolbar-left,
+.better-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 :deep(.table-actions) {
   display: flex;
   align-items: center;
@@ -794,14 +1112,130 @@ watch(watchTabs, (tabs) => {
   margin-bottom: 12px;
 }
 
+.better-context {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(97, 118, 148, 0.18);
+  background: rgba(11, 19, 31, 0.5);
+}
+
+.better-context.warning {
+  border-color: rgba(250, 204, 21, 0.28);
+  background: rgba(120, 78, 15, 0.14);
+}
+
+.better-context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.better-context-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.better-context-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.better-context-hint {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
 .better-table-wrap {
   overflow-x: auto;
 }
 
-.better-reasons {
-  min-width: 260px;
+.better-order {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.better-order-rank {
+  font-size: 20px;
+  color: var(--primary-color);
+}
+
+.better-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.better-metric-list,
+.better-rank-list,
+.better-reason-card {
+  min-width: 0;
+}
+
+.better-metric-list,
+.better-rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.better-metric-row,
+.better-rank-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.better-metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.better-metric-label,
+.better-rank-label {
+  font-weight: 600;
+}
+
+.better-metric-sub,
+.better-rank-compare,
+.better-reason-meta {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.better-rank-value {
+  font-weight: 600;
+}
+
+.better-reason-card {
   line-height: 1.6;
   white-space: normal;
   word-break: break-word;
+}
+
+.better-reason-summary {
+  font-weight: 600;
+}
+
+.better-reason-meta {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .better-context-head,
+  .better-metric-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

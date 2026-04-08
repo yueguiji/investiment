@@ -199,6 +199,9 @@ type FundScreenerItem struct {
 	NetGrowth6        *float64 `json:"netGrowth6"`
 	NetGrowth12       *float64 `json:"netGrowth12"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`
+	Volatility12      *float64 `json:"volatility12"`
+	Sharpe12          *float64 `json:"sharpe12"`
+	Calmar12          *float64 `json:"calmar12"`
 	ScreenUpdatedAt   string   `json:"screenUpdatedAt"`
 	Watchlist         bool     `json:"watchlist"`
 }
@@ -218,6 +221,9 @@ type FundScreenerResult struct {
 }
 
 type FundRefreshStatus struct {
+	State           string `json:"state"`
+	StateLabel      string `json:"stateLabel"`
+	Scope           string `json:"scope"`
 	Refreshing      bool   `json:"refreshing"`
 	NeedsRefresh    bool   `json:"needsRefresh"`
 	Triggered       bool   `json:"triggered"`
@@ -226,6 +232,9 @@ type FundRefreshStatus struct {
 	UpdatedToday    int64  `json:"updatedToday"`
 	ScreenedCount   int64  `json:"screenedCount"`
 	UniverseCount   int64  `json:"universeCount"`
+	TargetCount     int64  `json:"targetCount"`
+	TargetUpdated   int64  `json:"targetUpdated"`
+	TargetPending   int64  `json:"targetPending"`
 	ProgressCurrent int64  `json:"progressCurrent"`
 	ProgressTotal   int64  `json:"progressTotal"`
 	CurrentCode     string `json:"currentCode"`
@@ -242,18 +251,45 @@ type BetterFundQuery struct {
 
 type BetterFundCandidate struct {
 	FundScreenerItem
-	BetterScore float64  `json:"betterScore"`
-	Reasons     []string `json:"reasons"`
+	RecommendationRank int                `json:"recommendationRank"`
+	BetterScore        float64            `json:"betterScore"`
+	ReasonSummary      string             `json:"reasonSummary"`
+	ScopeLabel         string             `json:"scopeLabel"`
+	ComparedUniverse   int                `json:"comparedUniverse"`
+	Reasons            []string           `json:"reasons"`
+	Metrics            []BetterFundMetric `json:"metrics"`
+}
+
+type BetterFundMetric struct {
+	Key                 string   `json:"key"`
+	Label               string   `json:"label"`
+	Better              string   `json:"better"`
+	CandidateValue      *float64 `json:"candidateValue"`
+	ReferenceValue      *float64 `json:"referenceValue"`
+	Delta               *float64 `json:"delta"`
+	Advantage           *float64 `json:"advantage"`
+	Weight              float64  `json:"weight"`
+	Contribution        float64  `json:"contribution"`
+	CandidateRank       int      `json:"candidateRank"`
+	ReferenceRank       int      `json:"referenceRank"`
+	RankTotal           int      `json:"rankTotal"`
+	CandidatePercentile *float64 `json:"candidatePercentile"`
+	ReferencePercentile *float64 `json:"referencePercentile"`
 }
 
 type BetterFundResult struct {
-	Reference     FundScreenerItem      `json:"reference"`
-	Candidates    []BetterFundCandidate `json:"candidates"`
-	Dimension     string                `json:"dimension"`
-	Total         int64                 `json:"total"`
-	Page          int                   `json:"page"`
-	PageSize      int                   `json:"pageSize"`
-	RefreshStatus FundRefreshStatus     `json:"refreshStatus"`
+	Reference        FundScreenerItem      `json:"reference"`
+	Candidates       []BetterFundCandidate `json:"candidates"`
+	Dimension        string                `json:"dimension"`
+	SortLabel        string                `json:"sortLabel"`
+	ScopeLabel       string                `json:"scopeLabel"`
+	ComparedUniverse int                   `json:"comparedUniverse"`
+	FallbackApplied  bool                  `json:"fallbackApplied"`
+	DataHint         string                `json:"dataHint"`
+	Total            int64                 `json:"total"`
+	Page             int                   `json:"page"`
+	PageSize         int                   `json:"pageSize"`
+	RefreshStatus    FundRefreshStatus     `json:"refreshStatus"`
 }
 
 type FundCompareQuery struct {
