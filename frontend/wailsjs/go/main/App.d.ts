@@ -20,6 +20,10 @@ export function AddStockGroup(arg1:number,arg2:string):Promise<string>;
 
 export function AddTransaction(arg1:portfolio.Transaction):Promise<portfolio.Transaction>;
 
+export function AnalyzeFundCollectionWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
+
+export function AnalyzeFundWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
+
 export function AnalyzeQuantLinkageWithAI(arg1:quant.LinkageAIRequest,arg2:number):Promise<Record<string, any>>;
 
 export function AnalyzeSentiment(arg1:string):Promise<models.SentimentResult>;
@@ -41,6 +45,8 @@ export function CheckSponsorCode(arg1:string):Promise<Record<string, any>>;
 export function CheckUpdate(arg1:number):Promise<string>;
 
 export function ClsCalendar():Promise<Array<any>>;
+
+export function CompareFunds(arg1:portfolio.FundCompareQuery):Promise<portfolio.FundCompareResult>;
 
 export function CreateAsset(arg1:asset.Asset):Promise<asset.Asset>;
 
@@ -94,7 +100,11 @@ export function DeletePromptTemplate(arg1:number):Promise<string>;
 
 export function DeleteQuantTemplate(arg1:number):Promise<boolean>;
 
+export function DeleteStockChangeHistory(arg1:number):Promise<string>;
+
 export function EMDictCode(arg1:string):Promise<Array<any>>;
+
+export function EnsureFundUniverse():Promise<number>;
 
 export function ExportConfig():Promise<string>;
 
@@ -122,6 +132,8 @@ export function GetAllIndustries():Promise<Array<string>>;
 
 export function GetAllMarkets():Promise<Array<string>>;
 
+export function GetAllStockChangesWithPaging(arg1:number):Promise<data.StockChangesResponse>;
+
 export function GetAllStockInfoById(arg1:number):Promise<models.AllStockInfo>;
 
 export function GetAllStockInfoList(arg1:data.AllStockInfoQuery):Promise<data.AllStockInfoPageData>;
@@ -136,11 +148,19 @@ export function GetAssets():Promise<Array<asset.Asset>>;
 
 export function GetAssetsByType(arg1:string):Promise<Array<asset.Asset>>;
 
+export function GetBetterFunds(arg1:portfolio.BetterFundQuery):Promise<portfolio.BetterFundResult>;
+
 export function GetConfig():Promise<data.SettingConfig>;
 
 export function GetFollowList(arg1:number):Promise<any>;
 
 export function GetFollowedFund():Promise<Array<data.FollowedFund>>;
+
+export function GetFundPortfolioDashboard():Promise<portfolio.FundPortfolioDashboard>;
+
+export function GetFundProfile(arg1:string):Promise<portfolio.FundProfile>;
+
+export function GetFundScreener(arg1:portfolio.FundScreenerQuery):Promise<portfolio.FundScreenerResult>;
 
 export function GetGroupList():Promise<Array<data.Group>>;
 
@@ -202,6 +222,10 @@ export function GetQuantTemplates(arg1:number,arg2:string,arg3:number,arg4:numbe
 
 export function GetSponsorInfo():Promise<Record<string, any>>;
 
+export function GetStockChangeHistory(arg1:models.StockChangeHistoryQuery):Promise<models.StockChangeHistoryPageData>;
+
+export function GetStockChanges(arg1:Array<number>,arg2:number,arg3:number):Promise<data.StockChangesResponse>;
+
 export function GetStockKLine(arg1:string,arg2:string,arg3:number):Promise<any>;
 
 export function GetStockList(arg1:string):Promise<Array<data.StockBasic>>;
@@ -244,6 +268,10 @@ export function ReFleshTelegraphList(arg1:string):Promise<any>;
 
 export function RebuildHouseholdLiabilitySchedule(arg1:number):Promise<boolean>;
 
+export function RefreshFundProfile(arg1:string):Promise<portfolio.FundProfile>;
+
+export function RefreshFundScreenerData(arg1:number):Promise<Record<string, any>>;
+
 export function RemoveGroup(arg1:number):Promise<string>;
 
 export function RemoveStockGroup(arg1:string,arg2:string,arg3:number):Promise<string>;
@@ -257,6 +285,10 @@ export function SaveAsMarkdown(arg1:string,arg2:string):Promise<string>;
 export function SaveHouseholdSnapshot(arg1:string):Promise<asset.HouseholdSnapshot>;
 
 export function SaveImage(arg1:string,arg2:string):Promise<string>;
+
+export function SavePortfolioSnapshot():Promise<portfolio.ProfitSnapshot>;
+
+export function SaveStockChangesToHistory(arg1:Array<number>):Promise<string>;
 
 export function SaveWordFile(arg1:string,arg2:string):Promise<string>;
 
@@ -284,6 +316,8 @@ export function StockResearchReport(arg1:string):Promise<Array<any>>;
 
 export function SummaryStockNews(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:boolean):Promise<void>;
 
+export function SyncPortfolioQuotes():Promise<portfolio.PortfolioSummary>;
+
 export function TestAIConfigConnection(arg1:data.AIConfig):Promise<Record<string, any>>;
 
 export function UnFollow(arg1:string):Promise<string>;
@@ -293,6 +327,8 @@ export function UnFollowFund(arg1:string):Promise<string>;
 export function UpdateAsset(arg1:asset.Asset):Promise<asset.Asset>;
 
 export function UpdateConfig(arg1:data.SettingConfig):Promise<string>;
+
+export function UpdateFundWatchGroup(arg1:string,arg2:string):Promise<string>;
 
 export function UpdateGroupSort(arg1:number,arg2:number):Promise<boolean>;
 
@@ -313,6 +349,8 @@ export function UpdateHouseholdProtection(arg1:asset.HouseholdProtection):Promis
 export function UpdatePromptTemplate(arg1:models.PromptTemplate):Promise<string>;
 
 export function UpdateQuantTemplate(arg1:quant.Template):Promise<quant.Template>;
+
+export function UpsertFundHoldingByAmount(arg1:portfolio.FundPositionInput):Promise<portfolio.Holding>;
 
 export function UpsertHouseholdBenchmark(arg1:asset.HouseholdBenchmarkRecord):Promise<asset.HouseholdBenchmarkRecord>;
 

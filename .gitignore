@@ -14,6 +14,7 @@ wails-dev.*.log
 domdump*.txt
 domerr*.txt
 ui_tree.txt
+/tmp_*.txt
 playwright*.png
 window_*.png
 startup_route.png
@@ -25,6 +26,7 @@ production_window.png
 go-stock/build/screenshot/
 go-stock/build/dev-logs/
 go-stock/build/tmp/
+/go-stock/tmp_*.go
 go-stock/img.png
 go-stock/wails-naive.png
 /go-stock/data/

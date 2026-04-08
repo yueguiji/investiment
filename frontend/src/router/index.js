@@ -14,6 +14,7 @@ import AssetUnlock from '../views/asset/AssetUnlock.vue'
 import StockMonitor from '../views/invest/StockMonitor.vue'
 import MarketOverview from '../views/invest/MarketOverview.vue'
 import FundWatch from '../views/invest/FundWatch.vue'
+import FundScreener from '../views/invest/FundScreener.vue'
 import ResearchCenter from '../views/invest/AIAnalysis.vue'
 import AgentChat from '../views/invest/AgentChat.vue'
 import AllStocks from '../views/invest/AllStocks.vue'
@@ -122,6 +123,12 @@ export const routes = [
         name: 'FundWatch',
         component: FundWatch,
         meta: { title: '基金自选', icon: 'CashOutline' }
+      },
+      {
+        path: 'fund-screener',
+        name: 'FundScreener',
+        component: FundScreener,
+        meta: { title: '基金筛选', icon: 'FunnelOutline' }
       },
       {
         path: 'research',

@@ -470,10 +470,21 @@ func (a *App) GetTelegraphList(source string) *[]*models.Telegraph {
 }
 
 func (a *App) ReFleshTelegraphList(source string) *[]*models.Telegraph {
-	// The original refresh path depends on a sentiment segmenter that isn't
-	// initialised in this host app yet. Keep the page usable by serving the
-	// stored list without triggering background crawlers that panic.
-	res := data.NewMarketNewsApi().GetTelegraphList(source)
+	newsAPI := data.NewMarketNewsApi()
+	switch strings.TrimSpace(source) {
+	case "财联社电报":
+		newsAPI.TelegraphList(30)
+	case "新浪财经":
+		newsAPI.GetSinaNews(30)
+	case "外媒":
+		newsAPI.TradingViewNews()
+	default:
+		newsAPI.TelegraphList(30)
+		newsAPI.GetSinaNews(30)
+		newsAPI.TradingViewNews()
+	}
+
+	res := newsAPI.GetTelegraphList(source)
 	if res == nil {
 		empty := []*models.Telegraph{}
 		return &empty
@@ -668,6 +679,15 @@ func (a *App) GetfundList(key string) []data.FundBasic {
 func (a *App) FollowFund(fundCode string) string {
 	return data.NewFundApi().FollowFund(fundCode)
 }
+func (a *App) UpdateFundWatchGroup(fundCode string, watchGroup string) string {
+	return data.NewFundApi().UpdateFundWatchGroup(fundCode, watchGroup)
+}
+func (a *App) RenameFundWatchGroup(fromGroup string, toGroup string) string {
+	return data.NewFundApi().RenameFundWatchGroup(fromGroup, toGroup)
+}
+func (a *App) DeleteFundWatchGroup(watchGroup string) string {
+	return data.NewFundApi().DeleteFundWatchGroup(watchGroup)
+}
 func (a *App) UnFollowFund(fundCode string) string {
 	return data.NewFundApi().UnFollowFund(fundCode)
 }
@@ -730,6 +750,50 @@ func (a *App) GetAIResponseResultList(query models.AIResponseResultQuery) *model
 	}
 	return page
 }
+func (a *App) GetStockChanges(changeTypes []int, pageIndex, pageSize int) *data.StockChangesResponse {
+	return data.NewStockChangesApi().GetStockChanges(changeTypes, pageIndex, pageSize)
+}
+
+func (a *App) GetAllStockChangesWithPaging(pageSize int) *data.StockChangesResponse {
+	all := data.NewStockChangesApi().GetAllStockChangesWithPaging(pageSize)
+	if all == nil {
+		return &data.StockChangesResponse{}
+	}
+	historyService := data.NewStockChangeHistoryService()
+	_, _ = historyService.SaveStockChangesWithDedup(all.Data)
+	return all
+}
+
+func (a *App) GetStockChangeHistory(query models.StockChangeHistoryQuery) *models.StockChangeHistoryPageData {
+	result, err := data.NewStockChangeHistoryService().GetHistoryList(query)
+	if err != nil {
+		return &models.StockChangeHistoryPageData{}
+	}
+	return result
+}
+
+func (a *App) SaveStockChangesToHistory(changeTypes []int) string {
+	api := data.NewStockChangesApi()
+	result := api.GetStockChanges(changeTypes, 0, 500)
+	if result == nil || len(result.Data) == 0 {
+		return "没有获取到异动数据"
+	}
+
+	err := data.NewStockChangeHistoryService().SaveStockChanges(result.Data)
+	if err != nil {
+		return "保存失败: " + err.Error()
+	}
+	return fmt.Sprintf("成功保存 %d 条异动数据", len(result.Data))
+}
+
+func (a *App) DeleteStockChangeHistory(days int) string {
+	err := data.NewStockChangeHistoryService().DeleteOldData(days)
+	if err != nil {
+		return "删除失败: " + err.Error()
+	}
+	return fmt.Sprintf("已删除 %d 天前的历史数据", days)
+}
+
 func (a *App) DeleteAIResponseResult(id uint) string {
 	if err := data.NewAIResponseResultService().DeleteAIResponseResult(id); err != nil {
 		return "delete failed"

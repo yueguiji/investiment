@@ -228,6 +228,7 @@ func AutoMigrate() {
 	db.Dao.AutoMigrate(&data.IndexBasic{})
 	db.Dao.AutoMigrate(&data.Settings{})
 	db.Dao.AutoMigrate(&models.AIResponseResult{})
+	db.Dao.AutoMigrate(&models.StockChangeHistory{})
 	db.Dao.AutoMigrate(&models.StockInfoHK{})
 	db.Dao.AutoMigrate(&models.StockInfoUS{})
 	db.Dao.AutoMigrate(&data.FollowedFund{})

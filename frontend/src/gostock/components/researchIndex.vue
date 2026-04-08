@@ -7,6 +7,7 @@ import AiRecommendStocksList from "./aiRecommendStocksList.vue";
 import PromptTemplateList from "./promptTemplateList.vue";
 import AllStockList from "./allStockList.vue";
 import AllStockInfoList from "./allStockInfoList.vue";
+import StockChangesMonitor from "./stockChangesMonitor.vue";
 import {EventsOff, EventsOn} from "../../../wailsjs/runtime";
 import {useRoute} from 'vue-router'
 
@@ -42,6 +43,9 @@ function updateTab(name) {
       </n-tab-pane>
       <n-tab-pane name="股票推荐记录" tab="股票推荐记录">
         <AiRecommendStocksList/>
+      </n-tab-pane>
+      <n-tab-pane name="异动监控" tab="异动监控">
+        <StockChangesMonitor/>
       </n-tab-pane>
       <n-tab-pane name="提示词模板" tab="提示词模板">
         <PromptTemplateList/>

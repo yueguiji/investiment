@@ -18,6 +18,8 @@ func InitDB(dbPath string) {
 
 	logger.SugaredLogger.Info("starting database migrations")
 
+	hadFundWatchlistColumn := db.Dao.Migrator().HasColumn(&data.FollowedFund{}, "is_watchlist")
+
 	// go-stock tables required by the integrated investment pages
 	db.Dao.AutoMigrate(&data.StockInfo{})
 	db.Dao.AutoMigrate(&data.StockBasic{})
@@ -25,9 +27,11 @@ func InitDB(dbPath string) {
 	db.Dao.AutoMigrate(&data.IndexBasic{})
 	db.Dao.AutoMigrate(&data.Settings{})
 	db.Dao.AutoMigrate(&models.AIResponseResult{})
+	db.Dao.AutoMigrate(&models.StockChangeHistory{})
 	db.Dao.AutoMigrate(&models.StockInfoHK{})
 	db.Dao.AutoMigrate(&models.StockInfoUS{})
 	db.Dao.AutoMigrate(&data.FollowedFund{})
+	db.Dao.AutoMigrate(&data.FundEstimateSnapshot{})
 	db.Dao.AutoMigrate(&data.FundBasic{})
 	db.Dao.AutoMigrate(&models.PromptTemplate{})
 	db.Dao.AutoMigrate(&data.Group{})
@@ -62,6 +66,17 @@ func InitDB(dbPath string) {
 	db.Dao.AutoMigrate(&portfolio.ProfitSnapshot{})
 	db.Dao.AutoMigrate(&quant.Template{})
 	db.Dao.AutoMigrate(&quant.TemplateCategory{})
+
+	if !hadFundWatchlistColumn {
+		logger.SugaredLogger.Info("migrating followed_fund watchlist flags")
+		db.Dao.Exec(`
+			UPDATE followed_fund
+			SET is_watchlist = CASE
+				WHEN code IN (SELECT stock_code FROM holdings WHERE quantity > 0) THEN 0
+				ELSE 1
+			END
+		`)
+	}
 
 	SeedRuntimeDataIfNeeded(dbPath, runtimeBaseDir(dbPath))
 

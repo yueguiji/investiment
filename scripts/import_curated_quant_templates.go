@@ -120,6 +120,18 @@ func curatedTemplates() []templateSeed {
 			Parameters:      "top_n=3; rebalance_days=5; grid_step=0.03; stop_loss=-0.06",
 			Status:          "active",
 		},
+		etfGridSeed("沪深300ETF保守网格", "以沪深300ETF为核心，结合 10 日均线偏离做 2.5% 分层补仓和减仓，适合震荡偏多环境下的低频网格。参考来源: https://www.joinquant.com/view/community/detail/90dc41ae172688f31e462ed3ede021ab?type=1 ; https://bigquant.com/codesharev3/68d0a1e5-ffc8-4c74-ab4b-add1104d7416 ; https://github.com/yaaks7/grid-trading", "510300", "围绕沪深300ETF单品种做低频保守网格，优先控制回撤而不是追求高换手。", "joinquant,bigquant,github", "top_n=1; rebalance_days=5; grid_step=0.025; stop_loss=-0.05"),
+		etfGridSeed("上证50ETF低波网格", "以上证50ETF为核心，侧重大盘蓝筹和低波动区间操作，适合资金偏稳健的长期底仓管理。参考来源: https://www.joinquant.com/view/community/detail/90dc41ae172688f31e462ed3ede021ab?type=1 ; https://github.com/yaaks7/grid-trading", "510050", "大盘价值风格网格，强调低频再平衡和小步长补仓。", "joinquant,github", "top_n=1; rebalance_days=5; grid_step=0.02; stop_loss=-0.045"),
+		etfGridSeed("中证500ETF震荡网格", "用中证500ETF做中盘风格震荡网格，保留一定弹性但仍以区间交易为主。参考来源: https://bigquant.com/codesharev3/68d0a1e5-ffc8-4c74-ab4b-add1104d7416 ; https://github.com/yaaks7/grid-trading", "510500", "中盘ETF在震荡市里的偏保守网格版本，适合中等风险承受能力。", "bigquant,github", "top_n=1; rebalance_days=4; grid_step=0.03; stop_loss=-0.055"),
+		etfGridSeed("红利ETF防御网格", "围绕红利ETF构建防御型网格，用分红和低波属性提升持有舒适度。参考来源: https://www.joinquant.com/view/community/detail/90dc41ae172688f31e462ed3ede021ab?type=1 ; https://bigquant.com/wiki/doc/ySSnil1iwd", "510880", "红利ETF低频网格，适合把高股息风格作为组合防守底仓。", "joinquant,bigquant", "top_n=1; rebalance_days=6; grid_step=0.02; stop_loss=-0.04"),
+		etfGridSeed("双宽基ETF对称网格", "在沪深300ETF和上证50ETF之间做对称网格分配，适合只想管理核心宽基仓位的保守型账户。参考来源: https://www.joinquant.com/view/community/detail/90dc41ae172688f31e462ed3ede021ab?type=1 ; https://github.com/yaaks7/grid-trading", "510300,510050", "双宽基组合网格，强调核心资产之间的仓位平衡。", "joinquant,github", "top_n=2; rebalance_days=5; grid_step=0.022; stop_loss=-0.045"),
+		etfGridSeed("宽基三篮子ETF均衡网格", "用沪深300、上证50和红利ETF组成三篮子保守网格，兼顾 Beta 和防御属性。参考来源: https://bigquant.com/wiki/doc/ySSnil1iwd ; https://github.com/yaaks7/grid-trading", "510300,510050,510880", "三篮子宽基+红利组合，适合账户的核心仓稳健运作。", "bigquant,github", "top_n=2; rebalance_days=5; grid_step=0.025; stop_loss=-0.05"),
+		etfGridSeed("股债平衡ETF缓冲网格", "将沪深300、中证500和国债ETF放在同一低频网格池里，用债券仓位缓冲权益波动。参考来源: https://bigquant.com/wiki/doc/ySSnil1iwd ; https://github.com/yaaks7/grid-trading", "510300,510500,511010", "权益与国债ETF混合网格，适合回撤敏感型账户。", "bigquant,github", "top_n=2; rebalance_days=7; grid_step=0.025; stop_loss=-0.04"),
+		etfGridSeed("红利低波+国债ETF低回撤网格", "将红利ETF、上证50ETF和国债ETF组合成偏低回撤网格，优先守住净值曲线稳定性。参考来源: https://bigquant.com/wiki/doc/ySSnil1iwd ; https://github.com/yaaks7/grid-trading", "510880,511010,510050", "红利与国债为主的保守型网格，适合存量资金管理。", "bigquant,github", "top_n=2; rebalance_days=7; grid_step=0.02; stop_loss=-0.035"),
+		etfGridSeed("核心资产ETF回撤补仓网格", "围绕沪深300、上证50、红利ETF和国债ETF做回撤补仓网格，在下跌中逐级加仓、反弹中逐级收回。参考来源: https://www.joinquant.com/view/community/detail/90dc41ae172688f31e462ed3ede021ab?type=1 ; https://github.com/yaaks7/grid-trading", "510300,510050,510880,511010", "四资产低回撤网格，适合核心仓位的慢节奏管理。", "joinquant,github", "top_n=2; rebalance_days=6; grid_step=0.02; stop_loss=-0.04"),
+		etfGridSeed("波动率自适应ETF网格", "以沪深300、中证500和红利ETF构成低频网格池，根据近期波动度动态控制加减仓触发。参考来源: https://bigquant.com/codesharev3/68d0a1e5-ffc8-4c74-ab4b-add1104d7416 ; https://github.com/yaaks7/grid-trading", "510300,510500,510880", "用波动率过滤信号的保守ETF网格版本。", "bigquant,github", "top_n=2; rebalance_days=5; grid_step=0.028; stop_loss=-0.05"),
+		etfGridSeed("月度再平衡ETF稳健网格", "把月度再平衡思想与 ETF 网格结合，减少交易噪音，适合长期持有和定期维护。参考来源: https://bigquant.com/wiki/doc/ySSnil1iwd ; https://github.com/yaaks7/grid-trading", "510300,510500,510050,510880", "月频调仓的稳健型ETF网格，降低过度交易。", "bigquant,github", "top_n=2; rebalance_days=20; grid_step=0.03; stop_loss=-0.055"),
+		etfGridSeed("现金管理增强ETF网格", "在沪深300、红利ETF和国债ETF之间做低频网格，把现金管理和权益增强结合起来。参考来源: https://bigquant.com/wiki/doc/ySSnil1iwd ; https://github.com/yaaks7/grid-trading", "510300,510880,511010", "更适合稳健自用账户的现金管理增强型ETF网格。", "bigquant,github", "top_n=2; rebalance_days=7; grid_step=0.02; stop_loss=-0.035"),
 		etfSeed("核心资产ETF轮动", "参考聚宽社区“核心资产轮动”的思路，扩展成可运行的本地 Python 版。参考来源: https://www.joinquant.com/view/community/detail/d796ab61ca772cfd88d58786f8f9724f?type=1", "510300,159915,588000,510880,159949,512100", "以核心资产与风格 ETF 为池，按 20/60 日双动量和近 20 日波动率筛选前 2 名持有。", "joinquant"),
 		etfSeed("二八ETF轮动策略", "参考 BigQuant 二八 ETF 轮动思路整理成标准模板。参考来源: https://bigquant.com/codesharev2/813ee05f-a7eb-45ad-aa46-51f634e19554", "510300,510050,159915,159949,510880", "二八轮动框架，风险偏好抬升时偏向成长和弹性 ETF，风险偏好回落时偏向大盘和红利。", "bigquant"),
 		etfSeed("绝对动量ETF轮动", "参考 GitHub 上常见的 Dual Momentum / ETF Rotation 实现，结合 A 股宽基 ETF 池做成本地可运行版本。参考来源: https://github.com/mfrdixon/ETF-Portfolio-Management ; https://github.com/mhallsmoore/qstrader", "510300,510500,159915,588000,510880,159845", "绝对动量先过滤负收益资产，再在剩余 ETF 中持有前 2 名。", "github"),
@@ -256,6 +268,30 @@ func etfSeed(name string, description string, linked string, intro string, sourc
 		SourcePlatforms: source,
 		LinkedStocks:    linked,
 		Parameters:      "top_n=2; rebalance_days=5; momentum_windows=20,60",
+		Status:          "active",
+	}
+}
+
+func etfGridSeed(name string, description string, linked string, intro string, source string, parameters string) templateSeed {
+	_ = intro
+	return templateSeed{
+		Name:            name,
+		CategorySort:    3,
+		Description:     description,
+		Code:            etfRotationGridCode(strings.Split(linked, ",")),
+		BrokerPlatform:  "聚宽/BigQuant/GitHub/通用",
+		StrategyType:    "ETF网格",
+		ScriptCategory:  "策略主脚本",
+		StyleTags:       "grid-trading,etf-rotation,mean-reversion",
+		EmotionTags:     "low-emotion,normal-emotion",
+		VolumeTags:      "low-volume,incremental-volume",
+		ScenarioTags:    "sideways-market,high-divergence,market-sharp-drop",
+		CapitalTags:     "capital-20k-30k,capital-30k-50k,capital-50k-100k,capital-100k-300k",
+		FactorTags:      "volatility,mean-reversion,capital-flow",
+		SearchKeywords:  fmt.Sprintf("%s %s ETF 网格 保守 低回撤", name, strings.ReplaceAll(linked, ",", " ")),
+		SourcePlatforms: source,
+		LinkedStocks:    linked,
+		Parameters:      parameters,
 		Status:          "active",
 	}
 }

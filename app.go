@@ -124,12 +124,10 @@ func (a *App) startPortfolioRefresh() {
 			return
 		}
 		holdings := a.PortfolioService.GetAllHoldings()
-		for _, h := range holdings {
-			price, change, rate := a.Bridge.GetStockRealtimePrice(h.StockCode)
-			if price > 0 {
-				a.PortfolioService.UpdateHoldingPrice(h.StockCode, price, change, rate)
-			}
+		if len(holdings) == 0 {
+			return
 		}
+		a.PortfolioService.SyncPortfolioQuotes()
 	})
 
 	// 每日收盘后保存快照
@@ -673,6 +671,10 @@ func (a *App) CreateHolding(h portfolio.Holding) *portfolio.Holding {
 	return a.PortfolioService.CreateHolding(h)
 }
 
+func (a *App) UpsertFundHoldingByAmount(input portfolio.FundPositionInput) *portfolio.Holding {
+	return a.PortfolioService.UpsertFundHoldingByAmount(input)
+}
+
 func (a *App) UpdateHolding(h portfolio.Holding) *portfolio.Holding {
 	return a.PortfolioService.UpdateHolding(h)
 }
@@ -693,8 +695,225 @@ func (a *App) GetPortfolioSummary() *portfolio.PortfolioSummary {
 	return a.PortfolioService.GetPortfolioSummary()
 }
 
+func (a *App) GetFundPortfolioDashboard() *portfolio.FundPortfolioDashboard {
+	return a.PortfolioService.GetFundDashboard()
+}
+
+func (a *App) GetFundProfile(code string) *portfolio.FundProfile {
+	return a.PortfolioService.GetFundProfile(code)
+}
+
+func (a *App) RefreshFundProfile(code string) *portfolio.FundProfile {
+	return a.PortfolioService.RefreshFundProfile(code)
+}
+
+func (a *App) GetFundScreener(query portfolio.FundScreenerQuery) *portfolio.FundScreenerResult {
+	return a.PortfolioService.GetFundScreener(query)
+}
+
+func (a *App) RefreshFundScreenerData(limit int) map[string]any {
+	return a.PortfolioService.RefreshFundScreenerData(limit)
+}
+
+func (a *App) EnsureFundUniverse() int64 {
+	return a.PortfolioService.EnsureFundUniverse()
+}
+
+func (a *App) GetBetterFunds(query portfolio.BetterFundQuery) *portfolio.BetterFundResult {
+	return a.PortfolioService.GetBetterFunds(query)
+}
+
+func (a *App) CompareFunds(query portfolio.FundCompareQuery) *portfolio.FundCompareResult {
+	return a.PortfolioService.CompareFunds(query)
+}
+
+func (a *App) AnalyzeFundWithAI(code string, aiConfigId int) map[string]any {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return map[string]any{"success": false, "message": "基金代码不能为空"}
+	}
+
+	profile := a.PortfolioService.GetFundProfile(code)
+	if profile == nil {
+		return map[string]any{"success": false, "message": "未找到基金资料"}
+	}
+
+	peers := a.PortfolioService.GetBetterFunds(portfolio.BetterFundQuery{
+		ReferenceCode: code,
+		Page:          1,
+		PageSize:      5,
+	})
+
+	payload, _ := json.MarshalIndent(map[string]any{
+		"fundProfile":      profile,
+		"betterCandidates": peers,
+	}, "", "  ")
+
+	prompt := strings.Join([]string{
+		"请分析下面这只基金，输出 Markdown。",
+		"重点回答：",
+		"1. 近7天、近1月、近3月、近6月和回撤是否匹配。",
+		"2. 同类排名、回撤修复和风险收益特征。",
+		"3. 如果候选替代基金更优，请说明为什么更优、适合什么场景。",
+		"4. 不给明确买卖指令，只给风格和风险提示。",
+		"基金数据如下：",
+		string(payload),
+	}, "\n")
+
+	return a.runFundAIAnalysis(aiConfigId, defaultFundAnalysisSystemPrompt, prompt)
+}
+
+func (a *App) AnalyzeFundCollectionWithAI(scope string, aiConfigId int) map[string]any {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "holdings"
+	}
+
+	var payload any
+	switch scope {
+	case "watchlist":
+		payload = map[string]any{
+			"scope": "watchlist",
+			"funds": data.NewFundApi().GetFollowedFund(),
+		}
+	default:
+		payload = map[string]any{
+			"scope":     "holdings",
+			"dashboard": a.PortfolioService.GetFundDashboard(),
+		}
+	}
+
+	body, _ := json.MarshalIndent(payload, "", "  ")
+	prompt := strings.Join([]string{
+		"请分析这组基金，输出 Markdown。",
+		"重点回答：",
+		"1. 当前组合的收益/回撤结构。",
+		"2. 债基、现金管理、权益基金的配置是否均衡。",
+		"3. 哪几只基金贡献了主要收益，哪几只拖累了表现。",
+		"4. 给出后续观察重点，不要给明确买卖指令。",
+		"数据如下：",
+		string(body),
+	}, "\n")
+
+	return a.runFundAIAnalysis(aiConfigId, defaultFundCollectionSystemPrompt, prompt)
+}
+
+func (a *App) SyncPortfolioQuotes() *portfolio.PortfolioSummary {
+	return a.PortfolioService.SyncPortfolioQuotes()
+}
+
 func (a *App) GetProfitHistory(days int) []portfolio.ProfitSnapshot {
 	return a.PortfolioService.GetProfitHistory(days)
+}
+
+func (a *App) SavePortfolioSnapshot() *portfolio.ProfitSnapshot {
+	return a.PortfolioService.SaveAndReturnDailySnapshot()
+}
+
+func (a *App) runFundAIAnalysis(aiConfigId int, systemPrompt string, userPrompt string) map[string]any {
+	if aiConfigId <= 0 {
+		configs := a.GetAiConfigs()
+		if len(configs) > 0 {
+			aiConfigId = int(configs[0].ID)
+		}
+	}
+
+	openAI := data.NewDeepSeekOpenAi(a.ctx, aiConfigId)
+	if strings.TrimSpace(openAI.BaseUrl) == "" || strings.TrimSpace(openAI.ApiKey) == "" || strings.TrimSpace(openAI.Model) == "" {
+		return map[string]any{
+			"success":   false,
+			"message":   "AI 源未配置完整，请先在设置页补充接口地址、API Key 和模型名称",
+			"analysis":  "",
+			"prompt":    userPrompt,
+			"aiEnabled": false,
+		}
+	}
+
+	client := resty.New().
+		SetBaseURL(strings.TrimSpace(openAI.BaseUrl)).
+		SetHeader("Authorization", "Bearer "+strings.TrimSpace(openAI.ApiKey)).
+		SetHeader("Content-Type", "application/json")
+	if openAI.TimeOut <= 0 {
+		openAI.TimeOut = 180
+	}
+	client.SetTimeout(time.Duration(openAI.TimeOut) * time.Second)
+	if openAI.HttpProxyEnabled && strings.TrimSpace(openAI.HttpProxy) != "" {
+		client.SetProxy(strings.TrimSpace(openAI.HttpProxy))
+	}
+
+	body := map[string]any{
+		"model":       openAI.Model,
+		"max_tokens":  4096,
+		"temperature": 0.2,
+		"stream":      false,
+		"messages": []map[string]any{
+			{
+				"role":    "system",
+				"content": systemPrompt,
+			},
+			{
+				"role":    "user",
+				"content": userPrompt,
+			},
+		},
+	}
+	if openAI.MaxTokens > 0 {
+		body["max_tokens"] = openAI.MaxTokens
+	}
+
+	resp, err := client.R().SetBody(body).Post("/chat/completions")
+	if err != nil {
+		return map[string]any{
+			"success":   false,
+			"message":   err.Error(),
+			"analysis":  "",
+			"prompt":    userPrompt,
+			"aiEnabled": true,
+			"model":     openAI.Model,
+		}
+	}
+	if resp.StatusCode() >= 400 {
+		return map[string]any{
+			"success":   false,
+			"message":   fmt.Sprintf("模型调用失败: HTTP %d %s", resp.StatusCode(), truncateText(resp.String(), 320)),
+			"analysis":  "",
+			"prompt":    userPrompt,
+			"aiEnabled": true,
+			"model":     openAI.Model,
+		}
+	}
+
+	var aiResp data.AiResponse
+	if err := json.Unmarshal(resp.Body(), &aiResp); err != nil {
+		return map[string]any{
+			"success":   false,
+			"message":   "模型响应解析失败: " + err.Error(),
+			"analysis":  "",
+			"prompt":    userPrompt,
+			"aiEnabled": true,
+			"model":     openAI.Model,
+		}
+	}
+	if len(aiResp.Choices) == 0 {
+		return map[string]any{
+			"success":   false,
+			"message":   "模型没有返回分析内容",
+			"analysis":  "",
+			"prompt":    userPrompt,
+			"aiEnabled": true,
+			"model":     openAI.Model,
+		}
+	}
+
+	content := strings.TrimSpace(aiResp.Choices[0].Message.Content)
+	return map[string]any{
+		"success":   true,
+		"message":   "分析完成",
+		"analysis":  content,
+		"prompt":    userPrompt,
+		"aiEnabled": true,
+		"model":     openAI.Model,
+	}
 }
 
 // --- 量化模板 ---
@@ -1391,6 +1610,20 @@ var defaultHouseholdChatPromptTemplateContent = strings.Join([]string{
 	"5. 不给出具体股票、基金或高风险产品推荐，不夸张渲染。",
 	"6. 可以结合天津市/全国 benchmark 做粗略比较，但要注明这是基于当前基准数据的辅助判断。",
 	"7. 如果用户问后续动作，优先给出 3-5 条家庭财务层面的建议，围绕现金流、负债、保障和资产结构展开。",
+}, "\n")
+
+var defaultFundAnalysisSystemPrompt = strings.Join([]string{
+	"你是一名偏审慎风格的基金研究助手，擅长分析公募基金的阶段收益、回撤、同类排名和风格适配。",
+	"输出必须用简体中文 Markdown，结论要清楚，但不要制造确定性的买卖建议。",
+	"优先解释收益和回撤是否匹配、同类位置是否稳定、适合什么资金属性。",
+	"如果给出替代基金比较，只能基于输入数据说明优劣，不要编造外部数据。",
+}, "\n")
+
+var defaultFundCollectionSystemPrompt = strings.Join([]string{
+	"你是一名偏审慎风格的基金组合顾问，负责总结基金持仓或基金自选的结构、收益来源、风险暴露和后续观察重点。",
+	"输出必须用简体中文 Markdown。",
+	"不要给出确定性的买卖建议，不要承诺收益，不要编造输入之外的数据。",
+	"重点说明组合里谁贡献收益、谁拖累表现、回撤风险来自哪里、保守资产是否足够。",
 }, "\n")
 
 func extractPythonBlock(content string) string {

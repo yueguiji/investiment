@@ -30,6 +30,14 @@ export function AddTransaction(arg1) {
   return window['go']['main']['App']['AddTransaction'](arg1);
 }
 
+export function AnalyzeFundCollectionWithAI(arg1, arg2) {
+  return window['go']['main']['App']['AnalyzeFundCollectionWithAI'](arg1, arg2);
+}
+
+export function AnalyzeFundWithAI(arg1, arg2) {
+  return window['go']['main']['App']['AnalyzeFundWithAI'](arg1, arg2);
+}
+
 export function AnalyzeQuantLinkageWithAI(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeQuantLinkageWithAI'](arg1, arg2);
 }
@@ -72,6 +80,10 @@ export function CheckUpdate(arg1) {
 
 export function ClsCalendar() {
   return window['go']['main']['App']['ClsCalendar']();
+}
+
+export function CompareFunds(arg1) {
+  return window['go']['main']['App']['CompareFunds'](arg1);
 }
 
 export function CreateAsset(arg1) {
@@ -178,8 +190,16 @@ export function DeleteQuantTemplate(arg1) {
   return window['go']['main']['App']['DeleteQuantTemplate'](arg1);
 }
 
+export function DeleteStockChangeHistory(arg1) {
+  return window['go']['main']['App']['DeleteStockChangeHistory'](arg1);
+}
+
 export function EMDictCode(arg1) {
   return window['go']['main']['App']['EMDictCode'](arg1);
+}
+
+export function EnsureFundUniverse() {
+  return window['go']['main']['App']['EnsureFundUniverse']();
 }
 
 export function ExportConfig() {
@@ -234,6 +254,10 @@ export function GetAllMarkets() {
   return window['go']['main']['App']['GetAllMarkets']();
 }
 
+export function GetAllStockChangesWithPaging(arg1) {
+  return window['go']['main']['App']['GetAllStockChangesWithPaging'](arg1);
+}
+
 export function GetAllStockInfoById(arg1) {
   return window['go']['main']['App']['GetAllStockInfoById'](arg1);
 }
@@ -262,6 +286,10 @@ export function GetAssetsByType(arg1) {
   return window['go']['main']['App']['GetAssetsByType'](arg1);
 }
 
+export function GetBetterFunds(arg1) {
+  return window['go']['main']['App']['GetBetterFunds'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -272,6 +300,18 @@ export function GetFollowList(arg1) {
 
 export function GetFollowedFund() {
   return window['go']['main']['App']['GetFollowedFund']();
+}
+
+export function GetFundPortfolioDashboard() {
+  return window['go']['main']['App']['GetFundPortfolioDashboard']();
+}
+
+export function GetFundProfile(arg1) {
+  return window['go']['main']['App']['GetFundProfile'](arg1);
+}
+
+export function GetFundScreener(arg1) {
+  return window['go']['main']['App']['GetFundScreener'](arg1);
 }
 
 export function GetGroupList() {
@@ -394,6 +434,14 @@ export function GetSponsorInfo() {
   return window['go']['main']['App']['GetSponsorInfo']();
 }
 
+export function GetStockChangeHistory(arg1) {
+  return window['go']['main']['App']['GetStockChangeHistory'](arg1);
+}
+
+export function GetStockChanges(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetStockChanges'](arg1, arg2, arg3);
+}
+
 export function GetStockKLine(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetStockKLine'](arg1, arg2, arg3);
 }
@@ -478,6 +526,14 @@ export function RebuildHouseholdLiabilitySchedule(arg1) {
   return window['go']['main']['App']['RebuildHouseholdLiabilitySchedule'](arg1);
 }
 
+export function RefreshFundProfile(arg1) {
+  return window['go']['main']['App']['RefreshFundProfile'](arg1);
+}
+
+export function RefreshFundScreenerData(arg1) {
+  return window['go']['main']['App']['RefreshFundScreenerData'](arg1);
+}
+
 export function RemoveGroup(arg1) {
   return window['go']['main']['App']['RemoveGroup'](arg1);
 }
@@ -504,6 +560,14 @@ export function SaveHouseholdSnapshot(arg1) {
 
 export function SaveImage(arg1, arg2) {
   return window['go']['main']['App']['SaveImage'](arg1, arg2);
+}
+
+export function SavePortfolioSnapshot() {
+  return window['go']['main']['App']['SavePortfolioSnapshot']();
+}
+
+export function SaveStockChangesToHistory(arg1) {
+  return window['go']['main']['App']['SaveStockChangesToHistory'](arg1);
 }
 
 export function SaveWordFile(arg1, arg2) {
@@ -558,6 +622,10 @@ export function SummaryStockNews(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SummaryStockNews'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function SyncPortfolioQuotes() {
+  return window['go']['main']['App']['SyncPortfolioQuotes']();
+}
+
 export function TestAIConfigConnection(arg1) {
   return window['go']['main']['App']['TestAIConfigConnection'](arg1);
 }
@@ -576,6 +644,10 @@ export function UpdateAsset(arg1) {
 
 export function UpdateConfig(arg1) {
   return window['go']['main']['App']['UpdateConfig'](arg1);
+}
+
+export function UpdateFundWatchGroup(arg1, arg2) {
+  return window['go']['main']['App']['UpdateFundWatchGroup'](arg1, arg2);
 }
 
 export function UpdateGroupSort(arg1, arg2) {
@@ -616,6 +688,10 @@ export function UpdatePromptTemplate(arg1) {
 
 export function UpdateQuantTemplate(arg1) {
   return window['go']['main']['App']['UpdateQuantTemplate'](arg1);
+}
+
+export function UpsertFundHoldingByAmount(arg1) {
+  return window['go']['main']['App']['UpsertFundHoldingByAmount'](arg1);
 }
 
 export function UpsertHouseholdBenchmark(arg1) {

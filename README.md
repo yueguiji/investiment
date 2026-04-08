@@ -1,51 +1,79 @@
 # Rubin Investment
 
-`Rubin Investment` 是一个基于 `Wails + Vue` 的本地优先投资研究桌面应用。项目复用了 `go-stock` 的市场数据与分析能力，并在此基础上增加了资产管理、组合跟踪、量化模板工作流和 AI 辅助分析能力。
+`Rubin Investment` 是一个基于 `Wails + Vue + Go` 的本地优先桌面投资工具。项目复用了上游 [`go-stock`](https://github.com/ArvinLovegood/go-stock) 的部分行情、资讯和研究能力，并在此基础上扩展了资产分析、持仓分析、基金工作流、量化模板和 AI 辅助能力。
 
 [English Summary](#english-summary)
 
-本仓库已经按公开发布方式整理：
+## 当前定位
 
-- 不提交私有数据库、私有覆盖配置和个人凭据
-- 本地运行数据默认位于 `data/`、`logs/`
-- 私有配置通过仓库外部或本地忽略文件注入
-- 仓库保留了 `go-stock` 的上游归属与许可证说明
+这个仓库面向公开代码托管整理，默认遵循下面的边界：
 
-## 当前状态
+- 私有数据库、私有覆盖配置、Cookie、Token 不进入 Git
+- 本地运行数据默认落在仓库根目录 `data/`、`logs/`，并由 `.gitignore` 排除
+- 私有运行配置通过 `data/private-overrides.json` 或环境变量注入
+- 仓库保留上游 `go-stock` 的许可证与归属说明
 
-- 持仓模块仍在开发中，目前还不是完整交付状态
-- 量化联动推荐功能已接入，但当前稳定性一般，结果质量和联动表现仍需继续优化
+## 主要能力
 
-## 项目范围
+### 1. 资产分析
 
-- 基于 `Wails` 的桌面壳应用
-- 复用 `go-stock` 的行情、资讯和部分分析页面
-- 新增家庭资产管理、投资组合跟踪、量化模板能力
-- 使用本地 `SQLite` 数据库，支持初始化种子数据
+- 资产总览、资产明细、负债计划、家庭成员、基准数据
+- 家庭数字分析与资产解锁入口
+
+### 2. 投资分析
+
+- 股票监控、市场行情、研究中心、AI 智能体
+- 基金自选：支持分组、AI 分析、基金对比、基金详情抽屉
+- 基金筛选：支持按类型、阶段收益、回撤和行业筛选，并直接打开基金详情
+- 公告与研报、热点发现、投资日历、龙虎榜、资金排行
+- 全市场股票、股票资料库、AI 荐股记录
+
+### 3. 持仓分析
+
+- 持仓总览
+- 股票持仓
+- 基金持仓：支持按金额录入、查看详情、AI 解读
+- 收益历史
+- 交易记录
+
+### 4. 量化模板
+
+- 模板库
+- AI 生成
+- 脚本搜索
+- 联动推荐
+- 模板编辑、导出、启用
+
+## 技术栈
+
+- 桌面壳：`Wails`
+- 前端：`Vue 3`、`Naive UI`、`Vite`
+- 后端：`Go`
+- 本地数据：`SQLite`
 
 ## 仓库结构
 
-- `main.go`、`app.go`、`internal/`：桌面应用宿主与新增业务模块
-- `frontend/`：当前桌面应用前端
-- `go-stock/`：来源于上游并在本仓库中复用的市场分析相关代码
-- `docs/`：配置说明、审查记录和发布文档
-- `scripts/`：本地开发、构建和导出脚本
+- `main.go`、`app.go`、`internal/`：桌面宿主与本仓库新增业务模块
+- `frontend/`：当前桌面前端
+- `go-stock/`：复用与适配的上游市场分析代码
+- `docs/`：配置、审计、分支与运行记录
+- `scripts/`：开发、打包、导出辅助脚本
 
 ## 快速开始
 
 ### 环境要求
 
-- 与 `go.mod` 匹配的 Go 工具链
+- Go `1.26`
 - Node.js
-- Wails CLI
+- Wails CLI `v2`
 
-如未安装 `Wails`，可以执行：
+安装 Wails CLI：
 
 ```powershell
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-### 安装前端依赖
+### 安装依赖
 
 ```powershell
 cd frontend
@@ -53,12 +81,13 @@ npm ci
 cd ..
 ```
 
-### 运行测试
+### 本地校验
 
 ```powershell
 go test ./...
 cd frontend
 npm run build
+cd ..
 ```
 
 ### 启动开发环境
@@ -67,13 +96,13 @@ npm run build
 powershell -ExecutionPolicy Bypass -File .\scripts\start-wails-dev.ps1
 ```
 
-### 构建与导出
+### 打包导出
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1
 ```
 
-默认会导出到 `build/export/`。如果你想指定目录：
+如果需要指定导出目录：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1 -OutputDir D:\apps\rubin-investment -SkipShortcut
@@ -81,28 +110,53 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1 -OutputD
 
 ## 运行时配置
 
-私有运行时配置不会提交到仓库。程序会从以下位置读取本地覆盖配置：
+本仓库支持把本地敏感配置放在 Git 之外。
 
-- `data/private-overrides.json`
-- 或环境变量 `INVESTMENT_PRIVATE_CONFIG_PATH`
+运行时会从下面位置读取私有覆盖配置：
 
-支持的字段和示例见：
+1. 环境变量 `INVESTMENT_PRIVATE_CONFIG_PATH`
+2. 本地文件 `data/private-overrides.json`
+
+常见用途：
+
+- 指定本地种子数据库路径 `seedDbPaths`
+- 注入本地测试用 Cookie / Token
+- 覆盖资讯、下载、消息墙等运行时接口地址
+
+更多说明见：
 
 - [docs/runtime-configuration.md](docs/runtime-configuration.md)
 - [docs/examples/private-overrides.example.json](docs/examples/private-overrides.example.json)
+
+## 分支与发布
+
+当前阶段建议使用 beta 版本发布：
+
+- `main`：对外公开、可发布代码
+- `develop`：日常集成分支
+- `feature/*`：功能分支
+- `fix/*`：非紧急修复
+- `hotfix/*`：已发布 beta 的紧急修复
+
+Tag 约定：
+
+- `v0.x.y-beta.N`
+
+更多说明见：
+
 - [docs/branching-and-beta-plan.md](docs/branching-and-beta-plan.md)
 
-## 开源说明
+## 开源边界
 
-- 本仓库包含基于 `go-stock` 的衍生与扩展代码
-- `go-stock` 上游项目采用 Apache License 2.0
-- 本仓库已保留上游许可证文本与归属说明
-- 某些市场页面仍依赖第三方公开接口或上游兼容地址，这些能力应视为可选集成，而非本仓库自有基础设施
-- 请不要提交本地 `data/stock.db`、`data/private-overrides.json`、Cookie、Token 或其他个人敏感信息
+请不要提交以下内容：
 
-## 安全
+- `data/stock.db`
+- `data/private-overrides.json`
+- `go-stock/data/stock.db`
+- 浏览器 Cookie、账号 Token、API Key
+- 本机路径、日志、截图、打包产物
 
-如果你发现漏洞或意外泄露的敏感信息，请按照 [SECURITY.md](SECURITY.md) 处理，不要在公开 Issue 中直接披露细节。
+如果你发现敏感信息泄露或潜在漏洞，请按 [SECURITY.md](SECURITY.md) 处理。
 
 ## 贡献
 
@@ -110,31 +164,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1 -OutputD
 
 ## 上游归属
 
-本项目包含基于 `go-stock` 的衍生工作：
+本仓库包含基于 `go-stock` 的衍生与适配代码：
 
-- 上游仓库：https://github.com/ArvinLovegood/go-stock
+- 上游仓库：<https://github.com/ArvinLovegood/go-stock>
 - 上游协议：Apache License 2.0
 
 更多归属信息见 [NOTICE](NOTICE)。
 
 ## English Summary
 
-`Rubin Investment` is a local-first desktop app for investment research, built with `Wails + Vue`. It reuses parts of the upstream `go-stock` project and extends them with portfolio tracking, household asset workflows, quant templates, and AI-assisted analysis.
+`Rubin Investment` is a local-first desktop investment app built with `Wails + Vue + Go`.
 
-### Highlights
+Highlights:
 
-- Desktop application built with `Wails`
-- Local SQLite runtime data
-- Reused `go-stock` market and news capabilities
-- Extended with asset management, portfolio tracking, and quant workflows
-- Private runtime overrides are kept out of Git
+- Asset analysis workflows for households and liabilities
+- Investment research pages built on top of `go-stock`
+- Portfolio overview, stock holdings, fund holdings, and transaction tracking
+- Fund watch, fund screener, fund comparison, and fund detail workflows
+- Quant template management, AI generation, and strategy linkage
+- Private runtime overrides kept out of Git
 
-### Current Status
-
-- The portfolio/holding module is still under active development
-- The quant linkage recommendation feature is available, but it is not fully stable yet and still needs refinement
-
-### Quick Start
+Quick start:
 
 ```powershell
 cd frontend
@@ -147,45 +197,13 @@ cd ..
 powershell -ExecutionPolicy Bypass -File .\scripts\start-wails-dev.ps1
 ```
 
-### Build
+Build:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-export.ps1
 ```
 
-### GitHub Releases
-
-每次发布版本时，建议使用 `v*` tag。
-
-例如：
-
-```powershell
-git tag -a v0.1.0-beta.2 -m "v0.1.0-beta.2"
-git push origin v0.1.0-beta.2
-```
-
-推送后，GitHub Actions 会自动：
-
-- 构建 Windows 版本
-- 生成版本化的 `exe`
-- 生成对应的 `zip`
-- 自动上传到 GitHub Releases
-
-### Runtime Overrides
-
-Local private overrides are loaded from:
-
-- `data/private-overrides.json`
-- or `INVESTMENT_PRIVATE_CONFIG_PATH`
-
-See:
+For runtime override details, see:
 
 - [docs/runtime-configuration.md](docs/runtime-configuration.md)
 - [docs/examples/private-overrides.example.json](docs/examples/private-overrides.example.json)
-
-### Upstream Attribution
-
-This repository contains derivative work based on `go-stock`.
-
-- Upstream repository: https://github.com/ArvinLovegood/go-stock
-- Upstream license: Apache License 2.0

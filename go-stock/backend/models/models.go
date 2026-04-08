@@ -13,6 +13,46 @@ import (
 // @Desc
 //-----------------------------------------------------------------------------------
 
+type StockChangeHistory struct {
+	ID         uint      `json:"id" gorm:"primarykey"`
+	ChangeTime string    `json:"changeTime" gorm:"uniqueIndex:idx_unique_change;size:10"`
+	ChangeDate string    `json:"changeDate" gorm:"uniqueIndex:idx_unique_change;index;size:10"`
+	StockCode  string    `json:"stockCode" gorm:"uniqueIndex:idx_unique_change;index;size:20"`
+	StockName  string    `json:"stockName" gorm:"size:50"`
+	Market     int       `json:"market"`
+	ChangeType int       `json:"changeType" gorm:"uniqueIndex:idx_unique_change;index"`
+	TypeName   string    `json:"typeName" gorm:"size:20"`
+	Volume     int64     `json:"volume" gorm:"uniqueIndex:idx_unique_change"`
+	Price      float64   `json:"price" gorm:"uniqueIndex:idx_unique_change"`
+	ChangeRate float64   `json:"changeRate" gorm:"uniqueIndex:idx_unique_change"`
+	Amount     float64   `json:"amount" gorm:"uniqueIndex:idx_unique_change"`
+	CreatedAt  time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+func (StockChangeHistory) TableName() string {
+	return "stock_change_history"
+}
+
+type StockChangeHistoryQuery struct {
+	StockCode   string `json:"stockCode"`
+	StockName   string `json:"stockName"`
+	ChangeType  int    `json:"changeType"`
+	ChangeTypes []int  `json:"changeTypes"`
+	TypeName    string `json:"typeName"`
+	StartDate   string `json:"startDate"`
+	EndDate     string `json:"endDate"`
+	Page        int    `json:"page"`
+	PageSize    int    `json:"pageSize"`
+}
+
+type StockChangeHistoryPageData struct {
+	List       []StockChangeHistory `json:"list"`
+	Total      int64                `json:"total"`
+	Page       int                  `json:"page"`
+	PageSize   int                  `json:"pageSize"`
+	TotalPages int                  `json:"totalPages"`
+}
+
 type GitHubReleaseVersion struct {
 	Url       string `json:"url"`
 	AssetsUrl string `json:"assets_url"`

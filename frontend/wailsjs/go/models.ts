@@ -1,5 +1,5 @@
 export namespace asset {
-	
+
 	export class AssetCategory {
 	    ID: number;
 	    // Go type: time
@@ -13,11 +13,11 @@ export namespace asset {
 	    icon: string;
 	    description: string;
 	    sortOrder: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AssetCategory(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -30,7 +30,7 @@ export namespace asset {
 	        this.description = source["description"];
 	        this.sortOrder = source["sortOrder"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -69,11 +69,11 @@ export namespace asset {
 	    // Go type: time
 	    endDate?: any;
 	    remark: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Asset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -91,7 +91,7 @@ export namespace asset {
 	        this.endDate = this.convertValues(source["endDate"], null);
 	        this.remark = source["remark"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -110,18 +110,18 @@ export namespace asset {
 		    return a;
 		}
 	}
-	
+
 	export class CategorySummary {
 	    categoryId: number;
 	    categoryName: string;
 	    type: string;
 	    totalAmount: number;
 	    count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CategorySummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.categoryId = source["categoryId"];
@@ -138,11 +138,11 @@ export namespace asset {
 	    netAsset: number;
 	    investValue: number;
 	    categories: CategorySummary[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AssetSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.totalLiquid = source["totalLiquid"];
@@ -152,7 +152,7 @@ export namespace asset {
 	        this.investValue = source["investValue"];
 	        this.categories = this.convertValues(source["categories"], CategorySummary);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -171,7 +171,7 @@ export namespace asset {
 		    return a;
 		}
 	}
-	
+
 	export class HouseholdAIAnalysis {
 	    ID: number;
 	    // Go type: time
@@ -191,11 +191,11 @@ export namespace asset {
 	    inputPayload: string;
 	    analysisMarkdown: string;
 	    errorMessage: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdAIAnalysis(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -214,7 +214,7 @@ export namespace asset {
 	        this.analysisMarkdown = source["analysisMarkdown"];
 	        this.errorMessage = source["errorMessage"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -252,11 +252,11 @@ export namespace asset {
 	    lastUpdatedAt?: any;
 	    remark: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdAccount(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -274,7 +274,7 @@ export namespace asset {
 	        this.remark = source["remark"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -311,11 +311,11 @@ export namespace asset {
 	    version: string;
 	    description: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdBenchmarkRecord(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -333,7 +333,7 @@ export namespace asset {
 	        this.description = source["description"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -355,11 +355,11 @@ export namespace asset {
 	export class HouseholdChatMessage {
 	    role: string;
 	    content: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdChatMessage(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
@@ -388,11 +388,11 @@ export namespace asset {
 	    incomeCount: number;
 	    protectionCount: number;
 	    liabilityCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdDashboardSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.totalAssets = source["totalAssets"];
@@ -440,11 +440,11 @@ export namespace asset {
 	    valuationDate?: any;
 	    remark: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdFixedAsset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -464,7 +464,7 @@ export namespace asset {
 	        this.remark = source["remark"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -506,11 +506,11 @@ export namespace asset {
 	    lastReceivedAt?: any;
 	    remark: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdIncome(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -532,7 +532,7 @@ export namespace asset {
 	        this.remark = source["remark"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -580,11 +580,11 @@ export namespace asset {
 	    autoAmortize: boolean;
 	    remark: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdLiability(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -610,7 +610,7 @@ export namespace asset {
 	        this.remark = source["remark"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -647,11 +647,11 @@ export namespace asset {
 	    paymentAmount: number;
 	    closingPrincipal: number;
 	    status: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdLiabilitySchedule(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -668,7 +668,7 @@ export namespace asset {
 	        this.closingPrincipal = source["closingPrincipal"];
 	        this.status = source["status"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -693,11 +693,11 @@ export namespace asset {
 	    totalPayment: number;
 	    principalPaid: number;
 	    interestPaid: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdLiabilityTrendPoint(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.month = source["month"];
@@ -714,11 +714,11 @@ export namespace asset {
 	    owner: string;
 	    balance: number;
 	    shareOfLiquid: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdLiquidAssetDistributionItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -734,11 +734,11 @@ export namespace asset {
 	    totalLiquidAssets: number;
 	    monthlyNetIncome: number;
 	    monthlyDebtPayment: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdLiquidAssetTrendPoint(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.date = source["date"];
@@ -767,11 +767,11 @@ export namespace asset {
 	    isPrimary: boolean;
 	    isDependent: boolean;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdMember(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -790,7 +790,7 @@ export namespace asset {
 	        this.isDependent = source["isDependent"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -835,11 +835,11 @@ export namespace asset {
 	    monthlyElderlyCareDeduction: number;
 	    monthlyOtherSpecialDeduction: number;
 	    notes: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdProfile(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -865,7 +865,7 @@ export namespace asset {
 	        this.monthlyOtherSpecialDeduction = source["monthlyOtherSpecialDeduction"];
 	        this.notes = source["notes"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -907,11 +907,11 @@ export namespace asset {
 	    nextDueDate?: any;
 	    remark: string;
 	    isActive: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdProtection(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -933,7 +933,7 @@ export namespace asset {
 	        this.remark = source["remark"];
 	        this.isActive = source["isActive"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -979,11 +979,11 @@ export namespace asset {
 	    monthlyCoverageRate: number;
 	    monthlyEffectiveCoverageRate: number;
 	    triggerSource: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HouseholdSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1009,7 +1009,7 @@ export namespace asset {
 	        this.monthlyEffectiveCoverageRate = source["monthlyEffectiveCoverageRate"];
 	        this.triggerSource = source["triggerSource"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1032,7 +1032,7 @@ export namespace asset {
 }
 
 export namespace data {
-	
+
 	export class AIConfig {
 	    ID: number;
 	    // Go type: time
@@ -1048,11 +1048,11 @@ export namespace data {
 	    timeOut: number;
 	    httpProxy: string;
 	    httpProxyEnabled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AIConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1068,7 +1068,7 @@ export namespace data {
 	        this.httpProxy = source["httpProxy"];
 	        this.httpProxyEnabled = source["httpProxyEnabled"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1093,11 +1093,11 @@ export namespace data {
 	    page: number;
 	    pageSize: number;
 	    totalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AllStockInfoPageData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.list = this.convertValues(source["list"], models.AllStockInfo);
@@ -1106,7 +1106,7 @@ export namespace data {
 	        this.pageSize = source["pageSize"];
 	        this.totalPages = source["totalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1138,11 +1138,11 @@ export namespace data {
 	    minChange: string;
 	    maxChange: string;
 	    searchKeyWord: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AllStockInfoQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.page = source["page"];
@@ -1190,11 +1190,17 @@ export namespace data {
 	    netGrowth60?: number;
 	    netGrowthYTD?: number;
 	    netGrowthAll?: number;
-	
+	    netGrowth7?: number;
+	    maxDrawdown12?: number;
+	    topIndustry: string;
+	    topIndustryWeight?: number;
+	    topIndustryDate: string;
+	    screenUpdatedAt: string;
+
 	    static createFrom(source: any = {}) {
 	        return new FundBasic(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1224,8 +1230,14 @@ export namespace data {
 	        this.netGrowth60 = source["netGrowth60"];
 	        this.netGrowthYTD = source["netGrowthYTD"];
 	        this.netGrowthAll = source["netGrowthAll"];
+	        this.netGrowth7 = source["netGrowth7"];
+	        this.maxDrawdown12 = source["maxDrawdown12"];
+	        this.topIndustry = source["topIndustry"];
+	        this.topIndustryWeight = source["topIndustryWeight"];
+	        this.topIndustryDate = source["topIndustryDate"];
+	        this.screenUpdatedAt = source["screenUpdatedAt"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1254,6 +1266,8 @@ export namespace data {
 	    DeletedAt: any;
 	    code: string;
 	    name: string;
+	    isWatchlist: boolean;
+	    watchGroup: string;
 	    netUnitValue?: number;
 	    netUnitValueDate: string;
 	    netEstimatedUnit?: number;
@@ -1261,11 +1275,11 @@ export namespace data {
 	    netAccumulated?: number;
 	    netEstimatedRate?: number;
 	    fundBasic: FundBasic;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FollowedFund(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1274,6 +1288,8 @@ export namespace data {
 	        this.DeletedAt = this.convertValues(source["DeletedAt"], null);
 	        this.code = source["code"];
 	        this.name = source["name"];
+	        this.isWatchlist = source["isWatchlist"];
+	        this.watchGroup = source["watchGroup"];
 	        this.netUnitValue = source["netUnitValue"];
 	        this.netUnitValueDate = source["netUnitValueDate"];
 	        this.netEstimatedUnit = source["netEstimatedUnit"];
@@ -1282,7 +1298,7 @@ export namespace data {
 	        this.netEstimatedRate = source["netEstimatedRate"];
 	        this.fundBasic = this.convertValues(source["fundBasic"], FundBasic);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1301,7 +1317,7 @@ export namespace data {
 		    return a;
 		}
 	}
-	
+
 	export class Group {
 	    ID: number;
 	    // Go type: time
@@ -1312,11 +1328,11 @@ export namespace data {
 	    DeletedAt: any;
 	    name: string;
 	    sort: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Group(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1326,7 +1342,7 @@ export namespace data {
 	        this.name = source["name"];
 	        this.sort = source["sort"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1356,11 +1372,11 @@ export namespace data {
 	    stockCode: string;
 	    groupId: number;
 	    groupInfo: Group;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GroupStock(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1371,7 +1387,7 @@ export namespace data {
 	        this.groupId = source["groupId"];
 	        this.groupInfo = this.convertValues(source["groupInfo"], Group);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1425,11 +1441,11 @@ export namespace data {
 	    qgqpBId: string;
 	    assetUnlockPassword: string;
 	    aiConfigs: AIConfig[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SettingConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1464,7 +1480,7 @@ export namespace data {
 	        this.assetUnlockPassword = source["assetUnlockPassword"];
 	        this.aiConfigs = this.convertValues(source["aiConfigs"], AIConfig);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1510,11 +1526,11 @@ export namespace data {
 	    act_ent_type: string;
 	    bk_name: string;
 	    bk_code: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StockBasic(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1541,7 +1557,69 @@ export namespace data {
 	        this.bk_name = source["bk_name"];
 	        this.bk_code = source["bk_code"];
 	    }
-	
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class StockChangeItem {
+	    time: string;
+	    code: string;
+	    name: string;
+	    market: number;
+	    changeType: number;
+	    typeName: string;
+	    volume: number;
+	    price: number;
+	    changeRate: number;
+	    amount: number;
+
+	    static createFrom(source: any = {}) {
+	        return new StockChangeItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.time = source["time"];
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.market = source["market"];
+	        this.changeType = source["changeType"];
+	        this.typeName = source["typeName"];
+	        this.volume = source["volume"];
+	        this.price = source["price"];
+	        this.changeRate = source["changeRate"];
+	        this.amount = source["amount"];
+	    }
+	}
+	export class StockChangesResponse {
+	    totalCount: number;
+	    data: StockChangeItem[];
+
+	    static createFrom(source: any = {}) {
+	        return new StockChangesResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.totalCount = source["totalCount"];
+	        this.data = this.convertValues(source["data"], StockChangeItem);
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1618,11 +1696,11 @@ export namespace data {
 	    alarmChangePercent: number;
 	    alarmPrice: number;
 	    Groups: GroupStock[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StockInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1680,7 +1758,7 @@ export namespace data {
 	        this.alarmPrice = source["alarmPrice"];
 	        this.Groups = this.convertValues(source["Groups"], GroupStock);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1703,7 +1781,7 @@ export namespace data {
 }
 
 export namespace models {
-	
+
 	export class AIResponseResult {
 	    ID: number;
 	    // Go type: time
@@ -1719,11 +1797,11 @@ export namespace models {
 	    question: string;
 	    content: string;
 	    IsDel: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AIResponseResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1738,7 +1816,7 @@ export namespace models {
 	        this.content = source["content"];
 	        this.IsDel = source["IsDel"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1763,11 +1841,11 @@ export namespace models {
 	    page: number;
 	    pageSize: number;
 	    totalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AIResponseResultPageData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.list = this.convertValues(source["list"], AIResponseResult);
@@ -1776,7 +1854,7 @@ export namespace models {
 	        this.pageSize = source["pageSize"];
 	        this.totalPages = source["totalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1805,11 +1883,11 @@ export namespace models {
 	    question: string;
 	    startDate: string;
 	    endDate: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AIResponseResultQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.page = source["page"];
@@ -1853,11 +1931,11 @@ export namespace models {
 	    recommendStopLossPrice: string;
 	    riskRemarks: string;
 	    remarks: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AiRecommendStocks(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1886,7 +1964,7 @@ export namespace models {
 	        this.riskRemarks = source["riskRemarks"];
 	        this.remarks = source["remarks"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1911,11 +1989,11 @@ export namespace models {
 	    page: number;
 	    pageSize: number;
 	    totalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AiRecommendStocksPageData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.list = this.convertValues(source["list"], AiRecommendStocks);
@@ -1924,7 +2002,7 @@ export namespace models {
 	        this.pageSize = source["pageSize"];
 	        this.totalPages = source["totalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1953,11 +2031,11 @@ export namespace models {
 	    bkName: string;
 	    startDate: string;
 	    endDate: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AiRecommendStocksQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.page = source["page"];
@@ -1995,11 +2073,11 @@ export namespace models {
 	    CONCEPT: string;
 	    INDUSTRY: string;
 	    MAX_TRADE_DATE: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AllStockInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2023,7 +2101,7 @@ export namespace models {
 	        this.INDUSTRY = source["INDUSTRY"];
 	        this.MAX_TRADE_DATE = source["MAX_TRADE_DATE"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2050,11 +2128,11 @@ export namespace models {
 	    message: string;
 	    code: number;
 	    url: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AllStocksResp(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -2064,7 +2142,7 @@ export namespace models {
 	        this.code = source["code"];
 	        this.url = source["url"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2092,11 +2170,11 @@ export namespace models {
 	    name: string;
 	    content: string;
 	    type: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PromptTemplate(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2106,7 +2184,7 @@ export namespace models {
 	        this.content = source["content"];
 	        this.type = source["type"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2131,11 +2209,11 @@ export namespace models {
 	    page: number;
 	    pageSize: number;
 	    totalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PromptTemplatePageData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.list = this.convertValues(source["list"], PromptTemplate);
@@ -2144,7 +2222,7 @@ export namespace models {
 	        this.pageSize = source["pageSize"];
 	        this.totalPages = source["totalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2169,11 +2247,11 @@ export namespace models {
 	    name: string;
 	    type: string;
 	    content: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PromptTemplateQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.page = source["page"];
@@ -2189,11 +2267,11 @@ export namespace models {
 	    PositiveCount: number;
 	    NegativeCount: number;
 	    Description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SentimentResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Score = source["Score"];
@@ -2201,6 +2279,127 @@ export namespace models {
 	        this.PositiveCount = source["PositiveCount"];
 	        this.NegativeCount = source["NegativeCount"];
 	        this.Description = source["Description"];
+	    }
+	}
+	export class StockChangeHistory {
+	    id: number;
+	    changeTime: string;
+	    changeDate: string;
+	    stockCode: string;
+	    stockName: string;
+	    market: number;
+	    changeType: number;
+	    typeName: string;
+	    volume: number;
+	    price: number;
+	    changeRate: number;
+	    amount: number;
+	    // Go type: time
+	    createdAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new StockChangeHistory(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.changeTime = source["changeTime"];
+	        this.changeDate = source["changeDate"];
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.market = source["market"];
+	        this.changeType = source["changeType"];
+	        this.typeName = source["typeName"];
+	        this.volume = source["volume"];
+	        this.price = source["price"];
+	        this.changeRate = source["changeRate"];
+	        this.amount = source["amount"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class StockChangeHistoryPageData {
+	    list: StockChangeHistory[];
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	    totalPages: number;
+
+	    static createFrom(source: any = {}) {
+	        return new StockChangeHistoryPageData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.list = this.convertValues(source["list"], StockChangeHistory);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.totalPages = source["totalPages"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class StockChangeHistoryQuery {
+	    stockCode: string;
+	    stockName: string;
+	    changeType: number;
+	    changeTypes: number[];
+	    typeName: string;
+	    startDate: string;
+	    endDate: string;
+	    page: number;
+	    pageSize: number;
+
+	    static createFrom(source: any = {}) {
+	        return new StockChangeHistoryQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.changeType = source["changeType"];
+	        this.changeTypes = source["changeTypes"];
+	        this.typeName = source["typeName"];
+	        this.startDate = source["startDate"];
+	        this.endDate = source["endDate"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
 	    }
 	}
 	export class StockInfo {
@@ -2220,11 +2419,11 @@ export namespace models {
 	    CONCEPT: any;
 	    INDUSTRY: string;
 	    MAX_TRADE_DATE: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StockInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SECUCODE = source["SECUCODE"];
@@ -2276,11 +2475,11 @@ export namespace models {
 	    BLACK_CLOUD_TOPS: boolean;
 	    MORNING_STAR: boolean;
 	    NARROW_FINISH: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TechnicalIndicators(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.MACD_GOLDEN_FORK = source["MACD_GOLDEN_FORK"];
@@ -2335,11 +2534,11 @@ export namespace models {
 	    messageWallUrl: string;
 	    assetUnlockEnabled: boolean;
 	    IsDel: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2359,7 +2558,7 @@ export namespace models {
 	        this.assetUnlockEnabled = source["assetUnlockEnabled"];
 	        this.IsDel = source["IsDel"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2382,7 +2581,415 @@ export namespace models {
 }
 
 export namespace portfolio {
-	
+
+	export class AllocationItem {
+	    label: string;
+	    value: number;
+	    ratio: number;
+	    count: number;
+
+	    static createFrom(source: any = {}) {
+	        return new AllocationItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.value = source["value"];
+	        this.ratio = source["ratio"];
+	        this.count = source["count"];
+	    }
+	}
+	export class BetterFundCandidate {
+	    code: string;
+	    name: string;
+	    fundType: string;
+	    category: string;
+	    categoryLabel: string;
+	    riskLevel: string;
+	    company: string;
+	    manager: string;
+	    rating: string;
+	    scale: string;
+	    topIndustry: string;
+	    topIndustryWeight?: number;
+	    topIndustryDate: string;
+	    netGrowth7?: number;
+	    netGrowth1?: number;
+	    netGrowth3?: number;
+	    netGrowth6?: number;
+	    netGrowth12?: number;
+	    maxDrawdown12?: number;
+	    screenUpdatedAt: string;
+	    watchlist: boolean;
+	    betterScore: number;
+	    reasons: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new BetterFundCandidate(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.fundType = source["fundType"];
+	        this.category = source["category"];
+	        this.categoryLabel = source["categoryLabel"];
+	        this.riskLevel = source["riskLevel"];
+	        this.company = source["company"];
+	        this.manager = source["manager"];
+	        this.rating = source["rating"];
+	        this.scale = source["scale"];
+	        this.topIndustry = source["topIndustry"];
+	        this.topIndustryWeight = source["topIndustryWeight"];
+	        this.topIndustryDate = source["topIndustryDate"];
+	        this.netGrowth7 = source["netGrowth7"];
+	        this.netGrowth1 = source["netGrowth1"];
+	        this.netGrowth3 = source["netGrowth3"];
+	        this.netGrowth6 = source["netGrowth6"];
+	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown12 = source["maxDrawdown12"];
+	        this.screenUpdatedAt = source["screenUpdatedAt"];
+	        this.watchlist = source["watchlist"];
+	        this.betterScore = source["betterScore"];
+	        this.reasons = source["reasons"];
+	    }
+	}
+	export class BetterFundQuery {
+	    referenceCode: string;
+	    sameTypeOnly: boolean;
+	    dimension: string;
+	    page: number;
+	    pageSize: number;
+
+	    static createFrom(source: any = {}) {
+	        return new BetterFundQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.referenceCode = source["referenceCode"];
+	        this.sameTypeOnly = source["sameTypeOnly"];
+	        this.dimension = source["dimension"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	}
+	export class FundRefreshStatus {
+	    refreshing: boolean;
+	    needsRefresh: boolean;
+	    triggered: boolean;
+	    currentDate: string;
+	    lastRefreshHint: string;
+	    updatedToday: number;
+	    screenedCount: number;
+	    universeCount: number;
+	    progressCurrent: number;
+	    progressTotal: number;
+	    currentCode: string;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundRefreshStatus(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.refreshing = source["refreshing"];
+	        this.needsRefresh = source["needsRefresh"];
+	        this.triggered = source["triggered"];
+	        this.currentDate = source["currentDate"];
+	        this.lastRefreshHint = source["lastRefreshHint"];
+	        this.updatedToday = source["updatedToday"];
+	        this.screenedCount = source["screenedCount"];
+	        this.universeCount = source["universeCount"];
+	        this.progressCurrent = source["progressCurrent"];
+	        this.progressTotal = source["progressTotal"];
+	        this.currentCode = source["currentCode"];
+	        this.message = source["message"];
+	    }
+	}
+	export class FundScreenerItem {
+	    code: string;
+	    name: string;
+	    fundType: string;
+	    category: string;
+	    categoryLabel: string;
+	    riskLevel: string;
+	    company: string;
+	    manager: string;
+	    rating: string;
+	    scale: string;
+	    topIndustry: string;
+	    topIndustryWeight?: number;
+	    topIndustryDate: string;
+	    netGrowth7?: number;
+	    netGrowth1?: number;
+	    netGrowth3?: number;
+	    netGrowth6?: number;
+	    netGrowth12?: number;
+	    maxDrawdown12?: number;
+	    screenUpdatedAt: string;
+	    watchlist: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new FundScreenerItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.fundType = source["fundType"];
+	        this.category = source["category"];
+	        this.categoryLabel = source["categoryLabel"];
+	        this.riskLevel = source["riskLevel"];
+	        this.company = source["company"];
+	        this.manager = source["manager"];
+	        this.rating = source["rating"];
+	        this.scale = source["scale"];
+	        this.topIndustry = source["topIndustry"];
+	        this.topIndustryWeight = source["topIndustryWeight"];
+	        this.topIndustryDate = source["topIndustryDate"];
+	        this.netGrowth7 = source["netGrowth7"];
+	        this.netGrowth1 = source["netGrowth1"];
+	        this.netGrowth3 = source["netGrowth3"];
+	        this.netGrowth6 = source["netGrowth6"];
+	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown12 = source["maxDrawdown12"];
+	        this.screenUpdatedAt = source["screenUpdatedAt"];
+	        this.watchlist = source["watchlist"];
+	    }
+	}
+	export class BetterFundResult {
+	    reference: FundScreenerItem;
+	    candidates: BetterFundCandidate[];
+	    dimension: string;
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	    refreshStatus: FundRefreshStatus;
+
+	    static createFrom(source: any = {}) {
+	        return new BetterFundResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reference = this.convertValues(source["reference"], FundScreenerItem);
+	        this.candidates = this.convertValues(source["candidates"], BetterFundCandidate);
+	        this.dimension = source["dimension"];
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.refreshStatus = this.convertValues(source["refreshStatus"], FundRefreshStatus);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FundCompareQuery {
+	    codes: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new FundCompareQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.codes = source["codes"];
+	    }
+	}
+	export class FundCompareResult {
+	    items: FundScreenerItem[];
+	    total: number;
+	    missingCodes: string[];
+	    refreshedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundCompareResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], FundScreenerItem);
+	        this.total = source["total"];
+	        this.missingCodes = source["missingCodes"];
+	        this.refreshedAt = source["refreshedAt"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FundEstimatePoint {
+	    timestamp: number;
+	    time: string;
+	    estimatedUnit: number;
+	    estimatedRate?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FundEstimatePoint(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timestamp = source["timestamp"];
+	        this.time = source["time"];
+	        this.estimatedUnit = source["estimatedUnit"];
+	        this.estimatedRate = source["estimatedRate"];
+	    }
+	}
+	export class FundHoldingView {
+	    ID: number;
+	    // Go type: time
+	    CreatedAt: any;
+	    // Go type: time
+	    UpdatedAt: any;
+	    // Go type: gorm
+	    DeletedAt: any;
+	    stockCode: string;
+	    stockName: string;
+	    holdingType: string;
+	    market: string;
+	    avgCost: number;
+	    quantity: number;
+	    currentPrice: number;
+	    latestDailyRate?: number;
+	    latestDailyUpdatedAt: string;
+	    profitLoss: number;
+	    profitRate: number;
+	    totalCost: number;
+	    totalValue: number;
+	    todayChange: number;
+	    todayRate: number;
+	    // Go type: time
+	    buyDate?: any;
+	    brokerName: string;
+	    accountTag: string;
+	    remark: string;
+	    fundType: string;
+	    fundCompany: string;
+	    fundManager: string;
+	    fundRating: string;
+	    fundScale: string;
+	    category: string;
+	    categoryLabel: string;
+	    riskLevel: string;
+	    netUnitValue?: number;
+	    netUnitValueDate: string;
+	    netEstimatedUnit?: number;
+	    netEstimatedTime: string;
+	    netEstimatedRate?: number;
+	    netGrowth1?: number;
+	    netGrowth3?: number;
+	    netGrowth6?: number;
+	    netGrowth12?: number;
+	    netGrowth36?: number;
+	    netGrowthYTD?: number;
+	    estimateUpdated: boolean;
+	    estimateStatus: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundHoldingView(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
+	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
+	        this.DeletedAt = this.convertValues(source["DeletedAt"], null);
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.holdingType = source["holdingType"];
+	        this.market = source["market"];
+	        this.avgCost = source["avgCost"];
+	        this.quantity = source["quantity"];
+	        this.currentPrice = source["currentPrice"];
+	        this.latestDailyRate = source["latestDailyRate"];
+	        this.latestDailyUpdatedAt = source["latestDailyUpdatedAt"];
+	        this.profitLoss = source["profitLoss"];
+	        this.profitRate = source["profitRate"];
+	        this.totalCost = source["totalCost"];
+	        this.totalValue = source["totalValue"];
+	        this.todayChange = source["todayChange"];
+	        this.todayRate = source["todayRate"];
+	        this.buyDate = this.convertValues(source["buyDate"], null);
+	        this.brokerName = source["brokerName"];
+	        this.accountTag = source["accountTag"];
+	        this.remark = source["remark"];
+	        this.fundType = source["fundType"];
+	        this.fundCompany = source["fundCompany"];
+	        this.fundManager = source["fundManager"];
+	        this.fundRating = source["fundRating"];
+	        this.fundScale = source["fundScale"];
+	        this.category = source["category"];
+	        this.categoryLabel = source["categoryLabel"];
+	        this.riskLevel = source["riskLevel"];
+	        this.netUnitValue = source["netUnitValue"];
+	        this.netUnitValueDate = source["netUnitValueDate"];
+	        this.netEstimatedUnit = source["netEstimatedUnit"];
+	        this.netEstimatedTime = source["netEstimatedTime"];
+	        this.netEstimatedRate = source["netEstimatedRate"];
+	        this.netGrowth1 = source["netGrowth1"];
+	        this.netGrowth3 = source["netGrowth3"];
+	        this.netGrowth6 = source["netGrowth6"];
+	        this.netGrowth12 = source["netGrowth12"];
+	        this.netGrowth36 = source["netGrowth36"];
+	        this.netGrowthYTD = source["netGrowthYTD"];
+	        this.estimateUpdated = source["estimateUpdated"];
+	        this.estimateStatus = source["estimateStatus"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Holding {
 	    ID: number;
 	    // Go type: time
@@ -2398,6 +3005,8 @@ export namespace portfolio {
 	    avgCost: number;
 	    quantity: number;
 	    currentPrice: number;
+	    latestDailyRate?: number;
+	    latestDailyUpdatedAt: string;
 	    profitLoss: number;
 	    profitRate: number;
 	    totalCost: number;
@@ -2409,11 +3018,11 @@ export namespace portfolio {
 	    brokerName: string;
 	    accountTag: string;
 	    remark: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Holding(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2427,6 +3036,8 @@ export namespace portfolio {
 	        this.avgCost = source["avgCost"];
 	        this.quantity = source["quantity"];
 	        this.currentPrice = source["currentPrice"];
+	        this.latestDailyRate = source["latestDailyRate"];
+	        this.latestDailyUpdatedAt = source["latestDailyUpdatedAt"];
 	        this.profitLoss = source["profitLoss"];
 	        this.profitRate = source["profitRate"];
 	        this.totalCost = source["totalCost"];
@@ -2438,7 +3049,7 @@ export namespace portfolio {
 	        this.accountTag = source["accountTag"];
 	        this.remark = source["remark"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2465,12 +3076,20 @@ export namespace portfolio {
 	    todayProfit: number;
 	    stockCount: number;
 	    fundCount: number;
+	    bondFundCount: number;
+	    cashFundCount: number;
+	    equityFundCount: number;
+	    fundValue: number;
+	    stockValue: number;
+	    bondFundValue: number;
+	    cashFundValue: number;
+	    equityFundValue: number;
 	    holdings: Holding[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PortfolioSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.totalCost = source["totalCost"];
@@ -2480,9 +3099,17 @@ export namespace portfolio {
 	        this.todayProfit = source["todayProfit"];
 	        this.stockCount = source["stockCount"];
 	        this.fundCount = source["fundCount"];
+	        this.bondFundCount = source["bondFundCount"];
+	        this.cashFundCount = source["cashFundCount"];
+	        this.equityFundCount = source["equityFundCount"];
+	        this.fundValue = source["fundValue"];
+	        this.stockValue = source["stockValue"];
+	        this.bondFundValue = source["bondFundValue"];
+	        this.cashFundValue = source["cashFundValue"];
+	        this.equityFundValue = source["equityFundValue"];
 	        this.holdings = this.convertValues(source["holdings"], Holding);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2501,6 +3128,354 @@ export namespace portfolio {
 		    return a;
 		}
 	}
+	export class FundPortfolioDashboard {
+	    summary: PortfolioSummary;
+	    positions: FundHoldingView[];
+	    typeAllocation: AllocationItem[];
+	    platformAllocation: AllocationItem[];
+	    accountAllocation: AllocationItem[];
+	    companyAllocation: AllocationItem[];
+	    conservativeRatio: number;
+	    bondAllocationRatio: number;
+	    estimatedProfitToday: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FundPortfolioDashboard(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.summary = this.convertValues(source["summary"], PortfolioSummary);
+	        this.positions = this.convertValues(source["positions"], FundHoldingView);
+	        this.typeAllocation = this.convertValues(source["typeAllocation"], AllocationItem);
+	        this.platformAllocation = this.convertValues(source["platformAllocation"], AllocationItem);
+	        this.accountAllocation = this.convertValues(source["accountAllocation"], AllocationItem);
+	        this.companyAllocation = this.convertValues(source["companyAllocation"], AllocationItem);
+	        this.conservativeRatio = source["conservativeRatio"];
+	        this.bondAllocationRatio = source["bondAllocationRatio"];
+	        this.estimatedProfitToday = source["estimatedProfitToday"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FundPositionInput {
+	    stockCode: string;
+	    stockName: string;
+	    positionAmount: number;
+	    costAmount: number;
+	    brokerName: string;
+	    accountTag: string;
+	    remark: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundPositionInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.positionAmount = source["positionAmount"];
+	        this.costAmount = source["costAmount"];
+	        this.brokerName = source["brokerName"];
+	        this.accountTag = source["accountTag"];
+	        this.remark = source["remark"];
+	    }
+	}
+	export class FundStageRanking {
+	    period: string;
+	    returnRate?: number;
+	    similarAverageRate?: number;
+	    benchmarkLabel: string;
+	    benchmarkRate?: number;
+	    rank: number;
+	    rankTotal: number;
+	    rankPercentile?: number;
+	    rankDelta: number;
+	    rankDeltaDirection: string;
+	    quartile: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundStageRanking(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.period = source["period"];
+	        this.returnRate = source["returnRate"];
+	        this.similarAverageRate = source["similarAverageRate"];
+	        this.benchmarkLabel = source["benchmarkLabel"];
+	        this.benchmarkRate = source["benchmarkRate"];
+	        this.rank = source["rank"];
+	        this.rankTotal = source["rankTotal"];
+	        this.rankPercentile = source["rankPercentile"];
+	        this.rankDelta = source["rankDelta"];
+	        this.rankDeltaDirection = source["rankDeltaDirection"];
+	        this.quartile = source["quartile"];
+	    }
+	}
+	export class FundTrendPoint {
+	    timestamp: number;
+	    date: string;
+	    value: number;
+	    dailyReturn?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FundTrendPoint(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timestamp = source["timestamp"];
+	        this.date = source["date"];
+	        this.value = source["value"];
+	        this.dailyReturn = source["dailyReturn"];
+	    }
+	}
+	export class FundProfile {
+	    ID: number;
+	    // Go type: time
+	    CreatedAt: any;
+	    // Go type: time
+	    UpdatedAt: any;
+	    // Go type: gorm
+	    DeletedAt: any;
+	    stockCode: string;
+	    stockName: string;
+	    holdingType: string;
+	    market: string;
+	    avgCost: number;
+	    quantity: number;
+	    currentPrice: number;
+	    latestDailyRate?: number;
+	    latestDailyUpdatedAt: string;
+	    profitLoss: number;
+	    profitRate: number;
+	    totalCost: number;
+	    totalValue: number;
+	    todayChange: number;
+	    todayRate: number;
+	    // Go type: time
+	    buyDate?: any;
+	    brokerName: string;
+	    accountTag: string;
+	    remark: string;
+	    fundType: string;
+	    fundCompany: string;
+	    fundManager: string;
+	    fundRating: string;
+	    fundScale: string;
+	    category: string;
+	    categoryLabel: string;
+	    riskLevel: string;
+	    netUnitValue?: number;
+	    netUnitValueDate: string;
+	    netEstimatedUnit?: number;
+	    netEstimatedTime: string;
+	    netEstimatedRate?: number;
+	    netGrowth1?: number;
+	    netGrowth3?: number;
+	    netGrowth6?: number;
+	    netGrowth12?: number;
+	    netGrowth36?: number;
+	    netGrowthYTD?: number;
+	    estimateUpdated: boolean;
+	    estimateStatus: string;
+	    trend: FundTrendPoint[];
+	    trendUpdatedAt: string;
+	    latestReturn?: number;
+	    estimateTrend: FundEstimatePoint[];
+	    estimateTrendUpdatedAt: string;
+	    estimateLatestRate?: number;
+	    stageRankings: FundStageRanking[];
+	    stageRankingsUpdatedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundProfile(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
+	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
+	        this.DeletedAt = this.convertValues(source["DeletedAt"], null);
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.holdingType = source["holdingType"];
+	        this.market = source["market"];
+	        this.avgCost = source["avgCost"];
+	        this.quantity = source["quantity"];
+	        this.currentPrice = source["currentPrice"];
+	        this.latestDailyRate = source["latestDailyRate"];
+	        this.latestDailyUpdatedAt = source["latestDailyUpdatedAt"];
+	        this.profitLoss = source["profitLoss"];
+	        this.profitRate = source["profitRate"];
+	        this.totalCost = source["totalCost"];
+	        this.totalValue = source["totalValue"];
+	        this.todayChange = source["todayChange"];
+	        this.todayRate = source["todayRate"];
+	        this.buyDate = this.convertValues(source["buyDate"], null);
+	        this.brokerName = source["brokerName"];
+	        this.accountTag = source["accountTag"];
+	        this.remark = source["remark"];
+	        this.fundType = source["fundType"];
+	        this.fundCompany = source["fundCompany"];
+	        this.fundManager = source["fundManager"];
+	        this.fundRating = source["fundRating"];
+	        this.fundScale = source["fundScale"];
+	        this.category = source["category"];
+	        this.categoryLabel = source["categoryLabel"];
+	        this.riskLevel = source["riskLevel"];
+	        this.netUnitValue = source["netUnitValue"];
+	        this.netUnitValueDate = source["netUnitValueDate"];
+	        this.netEstimatedUnit = source["netEstimatedUnit"];
+	        this.netEstimatedTime = source["netEstimatedTime"];
+	        this.netEstimatedRate = source["netEstimatedRate"];
+	        this.netGrowth1 = source["netGrowth1"];
+	        this.netGrowth3 = source["netGrowth3"];
+	        this.netGrowth6 = source["netGrowth6"];
+	        this.netGrowth12 = source["netGrowth12"];
+	        this.netGrowth36 = source["netGrowth36"];
+	        this.netGrowthYTD = source["netGrowthYTD"];
+	        this.estimateUpdated = source["estimateUpdated"];
+	        this.estimateStatus = source["estimateStatus"];
+	        this.trend = this.convertValues(source["trend"], FundTrendPoint);
+	        this.trendUpdatedAt = source["trendUpdatedAt"];
+	        this.latestReturn = source["latestReturn"];
+	        this.estimateTrend = this.convertValues(source["estimateTrend"], FundEstimatePoint);
+	        this.estimateTrendUpdatedAt = source["estimateTrendUpdatedAt"];
+	        this.estimateLatestRate = source["estimateLatestRate"];
+	        this.stageRankings = this.convertValues(source["stageRankings"], FundStageRanking);
+	        this.stageRankingsUpdatedAt = source["stageRankingsUpdatedAt"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+	export class FundScreenerQuery {
+	    keyword: string;
+	    fundType: string;
+	    category: string;
+	    industry: string;
+	    minReturn7?: number;
+	    minReturn1?: number;
+	    minReturn3?: number;
+	    maxDrawdown12?: number;
+	    onlyWatchlist: boolean;
+	    page: number;
+	    pageSize: number;
+	    sortBy: string;
+	    sortOrder: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FundScreenerQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keyword = source["keyword"];
+	        this.fundType = source["fundType"];
+	        this.category = source["category"];
+	        this.industry = source["industry"];
+	        this.minReturn7 = source["minReturn7"];
+	        this.minReturn1 = source["minReturn1"];
+	        this.minReturn3 = source["minReturn3"];
+	        this.maxDrawdown12 = source["maxDrawdown12"];
+	        this.onlyWatchlist = source["onlyWatchlist"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.sortBy = source["sortBy"];
+	        this.sortOrder = source["sortOrder"];
+	    }
+	}
+	export class FundScreenerResult {
+	    items: FundScreenerItem[];
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	    universeCount: number;
+	    screenedCount: number;
+	    typeOptions: string[];
+	    categoryOptions: string[];
+	    industryOptions: string[];
+	    lastRefreshHint: string;
+	    refreshStatus: FundRefreshStatus;
+
+	    static createFrom(source: any = {}) {
+	        return new FundScreenerResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], FundScreenerItem);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.universeCount = source["universeCount"];
+	        this.screenedCount = source["screenedCount"];
+	        this.typeOptions = source["typeOptions"];
+	        this.categoryOptions = source["categoryOptions"];
+	        this.industryOptions = source["industryOptions"];
+	        this.lastRefreshHint = source["lastRefreshHint"];
+	        this.refreshStatus = this.convertValues(source["refreshStatus"], FundRefreshStatus);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+
+
 	export class ProfitSnapshot {
 	    ID: number;
 	    // Go type: time
@@ -2517,11 +3492,11 @@ export namespace portfolio {
 	    profitRate: number;
 	    stockValue: number;
 	    fundValue: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProfitSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2536,7 +3511,7 @@ export namespace portfolio {
 	        this.stockValue = source["stockValue"];
 	        this.fundValue = source["fundValue"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2566,6 +3541,9 @@ export namespace portfolio {
 	    holdingId: number;
 	    stockCode: string;
 	    stockName: string;
+	    holdingType: string;
+	    brokerName: string;
+	    accountTag: string;
 	    type: string;
 	    price: number;
 	    quantity: number;
@@ -2574,11 +3552,11 @@ export namespace portfolio {
 	    // Go type: time
 	    tradeDate?: any;
 	    remark: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Transaction(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2588,6 +3566,9 @@ export namespace portfolio {
 	        this.holdingId = source["holdingId"];
 	        this.stockCode = source["stockCode"];
 	        this.stockName = source["stockName"];
+	        this.holdingType = source["holdingType"];
+	        this.brokerName = source["brokerName"];
+	        this.accountTag = source["accountTag"];
 	        this.type = source["type"];
 	        this.price = source["price"];
 	        this.quantity = source["quantity"];
@@ -2596,7 +3577,7 @@ export namespace portfolio {
 	        this.tradeDate = this.convertValues(source["tradeDate"], null);
 	        this.remark = source["remark"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2619,7 +3600,7 @@ export namespace portfolio {
 }
 
 export namespace quant {
-	
+
 	export class GenerateRequest {
 	    strategyDescription: string;
 	    brokerPlatform: string;
@@ -2635,11 +3616,11 @@ export namespace quant {
 	    baseCode: string;
 	    existingScriptName: string;
 	    existingDescription: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GenerateRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.strategyDescription = source["strategyDescription"];
@@ -2669,11 +3650,11 @@ export namespace quant {
 	    name: string;
 	    description: string;
 	    sortOrder: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TemplateCategory(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2684,7 +3665,7 @@ export namespace quant {
 	        this.description = source["description"];
 	        this.sortOrder = source["sortOrder"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2738,11 +3719,11 @@ export namespace quant {
 	    status: string;
 	    // Go type: time
 	    lastUsedAt?: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Template(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2776,7 +3757,7 @@ export namespace quant {
 	        this.status = source["status"];
 	        this.lastUsedAt = this.convertValues(source["lastUsedAt"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2798,17 +3779,17 @@ export namespace quant {
 	export class LinkageAIRequest {
 	    summary: string;
 	    templates: Template[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LinkageAIRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.summary = source["summary"];
 	        this.templates = this.convertValues(source["templates"], Template);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2833,11 +3814,11 @@ export namespace quant {
 	    resultLimit: number;
 	    requirePython: boolean;
 	    preferPlatform: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ScriptSearchRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.query = source["query"];
@@ -2851,11 +3832,11 @@ export namespace quant {
 	    name: string;
 	    url: string;
 	    description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SearchLink(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -2866,11 +3847,11 @@ export namespace quant {
 	export class TagOption {
 	    label: string;
 	    value: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TagOption(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.label = source["label"];
@@ -2882,11 +3863,11 @@ export namespace quant {
 	    label: string;
 	    description: string;
 	    options: TagOption[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TagGroup(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -2894,7 +3875,7 @@ export namespace quant {
 	        this.description = source["description"];
 	        this.options = this.convertValues(source["options"], TagOption);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2913,8 +3894,8 @@ export namespace quant {
 		    return a;
 		}
 	}
-	
-	
+
+
 
 }
 
