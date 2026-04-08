@@ -2758,6 +2758,7 @@ export namespace portfolio {
 	export class FundRefreshStatus {
 	    state: string;
 	    stateLabel: string;
+	    scope: string;
 	    refreshing: boolean;
 	    needsRefresh: boolean;
 	    triggered: boolean;
@@ -2766,6 +2767,9 @@ export namespace portfolio {
 	    updatedToday: number;
 	    screenedCount: number;
 	    universeCount: number;
+	    targetCount: number;
+	    targetUpdated: number;
+	    targetPending: number;
 	    progressCurrent: number;
 	    progressTotal: number;
 	    currentCode: string;
@@ -2779,6 +2783,7 @@ export namespace portfolio {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.state = source["state"];
 	        this.stateLabel = source["stateLabel"];
+	        this.scope = source["scope"];
 	        this.refreshing = source["refreshing"];
 	        this.needsRefresh = source["needsRefresh"];
 	        this.triggered = source["triggered"];
@@ -2787,6 +2792,9 @@ export namespace portfolio {
 	        this.updatedToday = source["updatedToday"];
 	        this.screenedCount = source["screenedCount"];
 	        this.universeCount = source["universeCount"];
+	        this.targetCount = source["targetCount"];
+	        this.targetUpdated = source["targetUpdated"];
+	        this.targetPending = source["targetPending"];
 	        this.progressCurrent = source["progressCurrent"];
 	        this.progressTotal = source["progressTotal"];
 	        this.currentCode = source["currentCode"];
