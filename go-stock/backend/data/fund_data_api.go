@@ -1,6 +1,7 @@
 package data
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,9 @@ import (
 	"github.com/go-resty/resty/v2"
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
+	"golang.org/x/net/html/charset"
 	"html"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -113,6 +116,10 @@ func (f *FundApi) CrawlFundBasic(fundCode string) (*FundBasic, error) {
 			logger.SugaredLogger.Errorf("CrawlFundBasic panic: %v", r)
 		}
 	}()
+
+	if f.client != nil {
+		return f.crawlFundBasicHTTP(fundCode)
+	}
 
 	crawler := CrawlerApi{
 		crawlerBaseInfo: CrawlerBaseInfo{
@@ -256,6 +263,185 @@ func parsePercentPointer(text string) *float64 {
 		return nil
 	}
 	return &value
+}
+
+func (f *FundApi) crawlFundBasicHTTP(fundCode string) (*FundBasic, error) {
+	fundCode = strings.TrimSpace(fundCode)
+	if fundCode == "" {
+		return nil, fmt.Errorf("fund code is empty")
+	}
+
+	htmlContent, err := f.fetchFundBasicPageHTML(fundCode)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil, err
+	}
+
+	fund := &FundBasic{Code: fundCode}
+	parseFundBasicHTTPDocument(doc, fund)
+
+	pingzhongData, pingzhongErr := f.fetchFundPingzhongData(fundCode)
+	if pingzhongErr == nil {
+		parseFundBasicHTTPPingzhongData(pingzhongData, fund)
+	} else {
+		logger.SugaredLogger.Warnf("fetchFundPingzhongData failed for %s: %v", fundCode, pingzhongErr)
+	}
+
+	if strings.TrimSpace(fund.Name) == "" {
+		return nil, fmt.Errorf("fund page parse failed")
+	}
+	if strings.TrimSpace(fund.FullName) == "" {
+		fund.FullName = fund.Name
+	}
+
+	count := int64(0)
+	db.Dao.Model(fund).Where("code=?", fund.Code).Count(&count)
+	if count == 0 {
+		db.Dao.Create(fund)
+	} else {
+		db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
+	}
+
+	return fund, nil
+}
+
+func (f *FundApi) fetchFundBasicPageHTML(fundCode string) (string, error) {
+	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", "https://fund.eastmoney.com/").
+		Get(fmt.Sprintf("https://fund.eastmoney.com/%s.html", fundCode))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode() != 200 {
+		return "", fmt.Errorf("unexpected status code: %d", response.StatusCode())
+	}
+	return decodeHTTPDocument(response.Body(), response.Header().Get("Content-Type"))
+}
+
+func (f *FundApi) fetchFundPingzhongData(code string) (string, error) {
+	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", fmt.Sprintf("https://fund.eastmoney.com/%s.html", code)).
+		Get(fmt.Sprintf("https://fund.eastmoney.com/pingzhongdata/%s.js?v=%d", code, time.Now().UnixMilli()))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode() != 200 {
+		return "", fmt.Errorf("unexpected status code: %d", response.StatusCode())
+	}
+	return string(response.Body()), nil
+}
+
+func decodeHTTPDocument(body []byte, contentType string) (string, error) {
+	reader, err := charset.NewReader(bytes.NewReader(body), contentType)
+	if err != nil {
+		return "", err
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
+
+func parseFundBasicHTTPDocument(doc *goquery.Document, fund *FundBasic) {
+	name := strings.TrimSpace(doc.Find(".merchandiseDetail .fundDetail-tit").First().Text())
+	name = strings.ReplaceAll(name, "查看相关ETF>", "")
+	name = regexp.MustCompile(`\s*\([0-9A-Za-z]+\)\s*$`).ReplaceAllString(name, "")
+	if name != "" {
+		fund.Name = strings.TrimSpace(name)
+	}
+
+	doc.Find(".infoOfFund table td").Each(func(_ int, s *goquery.Selection) {
+		text := normalizeFundHTTPInfoText(s.Text())
+		if text == "" {
+			return
+		}
+		value := extractFundHTTPInfoValue(text)
+		switch {
+		case strings.Contains(text, "基金全称"):
+			fund.FullName = value
+		case strings.Contains(text, "基金类型") || strings.HasPrefix(text, "类型："):
+			fund.Type = value
+		case strings.Contains(text, "成立日") || strings.Contains(text, "成立日期"):
+			fund.Establishment = value
+		case strings.Contains(text, "基金规模") || strings.HasPrefix(text, "规模："):
+			fund.Scale = value
+		case strings.Contains(text, "管理人") || strings.Contains(text, "基金公司"):
+			fund.Company = value
+		case strings.Contains(text, "基金经理") || strings.HasPrefix(text, "经理："):
+			fund.Manager = value
+		case strings.Contains(text, "基金评级") || strings.Contains(text, "评级"):
+			fund.Rating = value
+		case strings.Contains(text, "跟踪标的"):
+			fund.TrackingTarget = value
+		}
+	})
+}
+
+func parseFundBasicHTTPPingzhongData(content string, fund *FundBasic) {
+	if fund == nil || strings.TrimSpace(content) == "" {
+		return
+	}
+	if value := extractFundHTTPJSStringVar(content, "fS_name"); value != "" && strings.TrimSpace(fund.Name) == "" {
+		fund.Name = strings.TrimSpace(value)
+	}
+	assignFundHTTPJSPercentVar(content, "syl_1y", &fund.NetGrowth1)
+	assignFundHTTPJSPercentVar(content, "syl_3y", &fund.NetGrowth3)
+	assignFundHTTPJSPercentVar(content, "syl_6y", &fund.NetGrowth6)
+	assignFundHTTPJSPercentVar(content, "syl_1n", &fund.NetGrowth12)
+}
+
+func normalizeFundHTTPInfoText(text string) string {
+	text = html.UnescapeString(strings.TrimSpace(text))
+	text = strings.ReplaceAll(text, "\u00a0", "")
+	text = strings.ReplaceAll(text, " ", "")
+	text = strings.ReplaceAll(text, " ", "")
+	return text
+}
+
+func extractFundHTTPInfoValue(text string) string {
+	for _, sep := range []string{"：", ":"} {
+		if strings.Contains(text, sep) {
+			parts := strings.SplitN(text, sep, 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return strings.TrimSpace(text)
+}
+
+func extractFundHTTPJSStringVar(content string, varName string) string {
+	pattern := fmt.Sprintf(`var\s+%s\s*=\s*"([^"]*)"`, regexp.QuoteMeta(varName))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(content)
+	if len(match) < 2 {
+		return ""
+	}
+	return html.UnescapeString(strings.TrimSpace(match[1]))
+}
+
+func extractFundHTTPJSPercentVar(content string, varName string) *float64 {
+	pattern := fmt.Sprintf(`var\s+%s\s*=\s*"([^"]*)"`, regexp.QuoteMeta(varName))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(content)
+	if len(match) < 2 {
+		return nil
+	}
+	return parsePercentPointer(match[1])
+}
+
+func assignFundHTTPJSPercentVar(content string, varName string, target **float64) {
+	if target == nil {
+		return
+	}
+	if value := extractFundHTTPJSPercentVar(content, varName); value != nil {
+		*target = value
+	}
 }
 
 func (f *FundApi) GetFundList(key string) []FundBasic {
