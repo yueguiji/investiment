@@ -1,7 +1,9 @@
 package portfolio
 
 import (
+	"encoding/json"
 	"math"
+	"regexp"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -28,14 +30,41 @@ type fundRefreshRuntimeState struct {
 	lastFinished  time.Time
 }
 
+type focusedRefreshCodesRuntimeCache struct {
+	mu      sync.RWMutex
+	key     string
+	expires time.Time
+	codes   []string
+}
+
+type recommendationRefreshRuntimeState struct {
+	mu            sync.Mutex
+	refreshing    bool
+	progressNow   int64
+	progressTotal int64
+	currentCode   string
+	lastStarted   time.Time
+	lastFinished  time.Time
+}
+
 var fundRefreshState fundRefreshRuntimeState
+var focusedRefreshCodesCache focusedRefreshCodesRuntimeCache
+var recommendationRefreshState recommendationRefreshRuntimeState
 
 const (
-	fundRefreshStateNotStarted = "not_started"
-	fundRefreshStatePartial    = "partial"
-	fundRefreshStateCompleted  = "completed"
-	fundRefreshScopeFocused    = "watchlist_related"
-	fundRefreshScopeAll        = "all_pending"
+	fundRefreshStateNotStarted    = "not_started"
+	fundRefreshStatePartial       = "partial"
+	fundRefreshStateCompleted     = "completed"
+	fundRefreshScopeFocused       = "watchlist_related"
+	fundRefreshScopeAll           = "all_pending"
+	recommendationStatusPending   = "pending"
+	recommendationStatusRunning   = "running"
+	recommendationStatusCompleted = "completed"
+	recommendationStatusFailed    = "failed"
+	betterFundRefreshWorkers      = 6
+	betterFundRefreshCap          = 600
+	betterFundTargetPerDimension  = 5
+	betterFundRefreshProbeBudget  = 24
 )
 
 type betterCandidateUniverse struct {
@@ -43,6 +72,17 @@ type betterCandidateUniverse struct {
 	ScopeLabel       string
 	FallbackApplied  bool
 	ComparedUniverse int
+	UniverseTotal    int
+	NetworkRefresh   bool
+	RefreshedCount   int
+	Limited          bool
+}
+
+type betterUniverseRefreshStats struct {
+	UniverseTotal  int
+	RefreshedCount int
+	NetworkRefresh bool
+	Limited        bool
 }
 
 type fundRefreshScopeSnapshot struct {
@@ -76,6 +116,8 @@ type betterMetricRank struct {
 }
 
 type fundRiskSnapshot struct {
+	MaxDrawdown3  *float64
+	MaxDrawdown6  *float64
 	MaxDrawdown12 *float64
 	Volatility12  *float64
 	Sharpe12      *float64
@@ -827,6 +869,9 @@ func (s *Service) runFundScreenerRefresh(limit int, scope string) {
 	fundRefreshState.mu.Unlock()
 
 	logger.SugaredLogger.Infof("fund screener refresh finished: scope=%s limit=%d queued=%d refreshed=%d", scope, limit, queuedCount, successCount)
+	if scope == fundRefreshScopeFocused {
+		go s.GetFundRecommendationRefreshStatus(true)
+	}
 }
 
 func resolveFundRefreshState(updatedToday, targetCount, pendingCount int64) (string, string) {
@@ -1021,14 +1066,28 @@ func (s *Service) loadFocusedFundRefreshCodes() []string {
 		return seedCodes
 	}
 
-	s.ensureFundBasicsForCodes(seedCodes)
+	cacheKey := strings.Join(seedCodes, ",")
+	focusedRefreshCodesCache.mu.RLock()
+	if focusedRefreshCodesCache.key == cacheKey && time.Now().Before(focusedRefreshCodesCache.expires) && len(focusedRefreshCodesCache.codes) > 0 {
+		cached := append([]string(nil), focusedRefreshCodesCache.codes...)
+		focusedRefreshCodesCache.mu.RUnlock()
+		return cached
+	}
+	focusedRefreshCodesCache.mu.RUnlock()
+
 	for _, code := range s.collectRecommendedFundCodes(loadFundWatchlistCodes(), 3) {
 		if trimmed := strings.TrimSpace(code); trimmed != "" {
 			codeSet[trimmed] = struct{}{}
 		}
 	}
 
-	return sortedCodeKeys(codeSet)
+	result := sortedCodeKeys(codeSet)
+	focusedRefreshCodesCache.mu.Lock()
+	focusedRefreshCodesCache.key = cacheKey
+	focusedRefreshCodesCache.codes = append([]string(nil), result...)
+	focusedRefreshCodesCache.expires = time.Now().Add(30 * time.Second)
+	focusedRefreshCodesCache.mu.Unlock()
+	return result
 }
 
 func loadTrackedFundCodes() []string {
@@ -1089,7 +1148,7 @@ func (s *Service) loadFocusedFundRefreshProgress(today string) focusedFundRefres
 	pendingCodes := make([]string, 0, len(targetCodes))
 	for _, code := range targetCodes {
 		basic, ok := basicMap[code]
-		if !ok || !isSameTradingDayString(basic.ScreenUpdatedAt, now) {
+		if !ok || shouldRefreshBetterFundCandidate(basic, now) {
 			pendingCodes = append(pendingCodes, code)
 			continue
 		}
@@ -1128,6 +1187,210 @@ func loadFundHoldingCodes() []string {
 	return dedupeCodes(codes)
 }
 
+func loadFundRecommendationLastRefreshHint(today string) string {
+	var progress FundRecommendationProgress
+	if err := db.Dao.
+		Where("refresh_date = ? AND status = ?", today, recommendationStatusCompleted).
+		Order("updated_at desc").
+		First(&progress).Error; err == nil {
+		return progress.UpdatedAt.Format("2006-01-02 15:04:05")
+	}
+	return ""
+}
+
+func normalizeFundRecommendationRunningRows(today string) {
+	recommendationRefreshState.mu.Lock()
+	refreshing := recommendationRefreshState.refreshing
+	recommendationRefreshState.mu.Unlock()
+	if refreshing {
+		return
+	}
+	db.Dao.Model(&FundRecommendationProgress{}).
+		Where("refresh_date = ? AND status = ?", today, recommendationStatusRunning).
+		Updates(map[string]any{
+			"status":        recommendationStatusPending,
+			"current_phase": "",
+			"message":       "",
+		})
+}
+
+func seedFundRecommendationProgress(today string, codes []string) {
+	if len(codes) == 0 {
+		return
+	}
+
+	var rows []FundRecommendationProgress
+	db.Dao.Where("refresh_date = ? AND reference_code IN ?", today, codes).Find(&rows)
+	existing := make(map[string]FundRecommendationProgress, len(rows))
+	for _, row := range rows {
+		existing[strings.TrimSpace(row.ReferenceCode)] = row
+	}
+
+	for _, code := range codes {
+		trimmed := strings.TrimSpace(code)
+		if trimmed == "" {
+			continue
+		}
+		row, ok := existing[trimmed]
+		if !ok {
+			db.Dao.Create(&FundRecommendationProgress{
+				ReferenceCode: trimmed,
+				RefreshDate:   today,
+				Status:        recommendationStatusPending,
+			})
+			continue
+		}
+		if row.Status == recommendationStatusCompleted && !hasRequiredRecommendationCachesForToday(trimmed, today) {
+			db.Dao.Model(&FundRecommendationProgress{}).
+				Where("id = ?", row.ID).
+				Updates(map[string]any{
+					"status":        recommendationStatusPending,
+					"current_phase": "",
+					"message":       "推荐缓存缺少必要维度，等待后台补齐",
+				})
+			continue
+		}
+		if row.Status == recommendationStatusRunning {
+			db.Dao.Model(&FundRecommendationProgress{}).
+				Where("id = ?", row.ID).
+				Updates(map[string]any{
+					"status":        recommendationStatusPending,
+					"current_phase": "",
+					"message":       "",
+				})
+		}
+	}
+}
+
+func hasRequiredRecommendationCachesForToday(code string, today string) bool {
+	requiredDimensions := []string{"balanced", "higher_return", "lower_drawdown"}
+	var count int64
+	db.Dao.Model(&FundRecommendationCache{}).
+		Where(
+			"reference_code = ? AND refresh_date = ? AND same_type_only = ? AND IFNULL(same_sub_type_only, 0) = ? AND fee_free7 = ? AND fee_free30 = ? AND include_a_class = ? AND IFNULL(only_a_class, 0) = ? AND dimension IN ?",
+			strings.TrimSpace(code), today, true, false, true, true, false, false, requiredDimensions,
+		).
+		Distinct("dimension").
+		Count(&count)
+	return count == int64(len(requiredDimensions))
+}
+
+func resolveFundRecommendationRefreshState(completed, pending int64, watchlistCount int64) (string, string) {
+	switch {
+	case watchlistCount <= 0:
+		return fundRefreshStateCompleted, "今日完成"
+	case completed <= 0 && pending > 0:
+		return fundRefreshStateNotStarted, "未开始"
+	case pending > 0:
+		return fundRefreshStatePartial, "部分更新"
+	default:
+		return fundRefreshStateCompleted, "今日完成"
+	}
+}
+
+func (s *Service) buildFundRecommendationRefreshStatus(autoStart bool) FundRecommendationRefreshStatus {
+	today := time.Now().Format("2006-01-02")
+	codes := loadFundWatchlistCodes()
+	normalizeFundRecommendationRunningRows(today)
+	seedFundRecommendationProgress(today, codes)
+
+	recommendationRefreshState.mu.Lock()
+	refreshing := recommendationRefreshState.refreshing
+	progressNow := recommendationRefreshState.progressNow
+	progressTotal := recommendationRefreshState.progressTotal
+	currentCode := recommendationRefreshState.currentCode
+	recommendationRefreshState.mu.Unlock()
+
+	var rows []FundRecommendationProgress
+	if len(codes) > 0 {
+		db.Dao.Where("refresh_date = ? AND reference_code IN ?", today, codes).Find(&rows)
+	}
+
+	completed := int64(0)
+	failed := int64(0)
+	pending := int64(0)
+	for _, row := range rows {
+		switch row.Status {
+		case recommendationStatusCompleted:
+			completed++
+		case recommendationStatusFailed:
+			failed++
+			pending++
+		default:
+			pending++
+		}
+	}
+
+	state, stateLabel := resolveFundRecommendationRefreshState(completed, pending, int64(len(codes)))
+	lastRefreshHint := loadFundRecommendationLastRefreshHint(today)
+	message := ""
+	fundRefreshStatus := s.buildFundRefreshStatus(s.EnsureFundUniverse())
+	if autoStart && len(codes) > 0 && fundRefreshStatus.TargetPending > 0 && !fundRefreshStatus.Refreshing {
+		fundRefreshStatus = s.ensureFundScreenerFreshAsync(0)
+	}
+	switch {
+	case len(codes) == 0:
+		message = "当前还没有自选基金，推荐检索任务处于空闲状态。"
+	case fundRefreshStatus.Refreshing && fundRefreshStatus.Scope == fundRefreshScopeFocused:
+		message = "正在等待今日自选相关基金指标更新完成，随后会自动继续推荐检索。"
+	case refreshing:
+		message = "后台正在检索自选基金的推荐结果，未完成的基金稍后会继续补齐。"
+	case state == fundRefreshStateCompleted:
+		message = "今日自选基金推荐缓存已完成，可以直接打开对比推荐查看。"
+	case state == fundRefreshStatePartial:
+		message = "今日自选基金推荐缓存部分完成，后续会从剩余基金继续补齐。"
+	default:
+		message = "今日自选基金推荐缓存尚未开始。"
+	}
+
+	status := FundRecommendationRefreshStatus{
+		State:           state,
+		StateLabel:      stateLabel,
+		Refreshing:      refreshing,
+		CurrentDate:     today,
+		WatchlistCount:  int64(len(codes)),
+		CompletedCount:  completed,
+		PendingCount:    pending,
+		FailedCount:     failed,
+		ProgressCurrent: progressNow,
+		ProgressTotal:   progressTotal,
+		CurrentCode:     currentCode,
+		LastRefreshHint: lastRefreshHint,
+		Message:         message,
+	}
+
+	if autoStart && len(codes) > 0 && !refreshing && !(fundRefreshStatus.Refreshing && fundRefreshStatus.Scope == fundRefreshScopeFocused) && pending > 0 {
+		if s.startFundRecommendationRefresh(today, codes) {
+			status.Triggered = true
+			status.Refreshing = true
+			status.Message = "已启动今日自选基金推荐检索，结果会在后台逐只补齐，未完成时下次会从剩余基金继续。"
+		}
+	}
+
+	return status
+}
+
+func (s *Service) startFundRecommendationRefresh(today string, codes []string) bool {
+	recommendationRefreshState.mu.Lock()
+	if recommendationRefreshState.refreshing {
+		recommendationRefreshState.mu.Unlock()
+		return false
+	}
+	recommendationRefreshState.refreshing = true
+	recommendationRefreshState.progressNow = 0
+	recommendationRefreshState.progressTotal = 0
+	recommendationRefreshState.currentCode = ""
+	recommendationRefreshState.lastStarted = time.Now()
+	recommendationRefreshState.mu.Unlock()
+
+	go s.runFundRecommendationRefresh(today, codes)
+	return true
+}
+
+func (s *Service) GetFundRecommendationRefreshStatus(autoStart bool) FundRecommendationRefreshStatus {
+	return s.buildFundRecommendationRefreshStatus(autoStart)
+}
+
 func (s *Service) ensureFundBasicsForCodes(codes []string) {
 	if len(codes) == 0 {
 		return
@@ -1160,24 +1423,23 @@ func (s *Service) collectRecommendedFundCodes(referenceCodes []string, perDimens
 
 	codeSet := make(map[string]struct{})
 	dimensions := []string{"balanced", "higher_return", "lower_drawdown"}
+	preferredQuery := betterFundDefaultCacheQuery()
 	for _, code := range dedupeCodes(referenceCodes) {
 		reference, err := dbQueryFundBasic(code)
 		if err != nil || reference == nil {
 			continue
 		}
 		refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
-		universe := loadBetterFundUniverse(*reference, refCategory.Category, true)
+		universe := loadBetterFundUniverse(*reference, refCategory.Category, true, false)
 		if len(universe.Basics) == 0 {
 			continue
 		}
 		for _, dimension := range dimensions {
+			preferredQuery.Dimension = dimension
 			candidates := buildBetterFundCandidates(*reference, universe, dimension)
-			sort.Slice(candidates, func(i, j int) bool {
-				if candidates[i].BetterScore == candidates[j].BetterScore {
-					return candidates[i].Code < candidates[j].Code
-				}
-				return candidates[i].BetterScore > candidates[j].BetterScore
-			})
+			candidates = finalizeBetterFundCandidates(candidates, universe)
+			candidates = applyBetterFundPreferenceFilters(candidates, preferredQuery)
+			candidates, _ = filterCandidatesStrongerThanReference(candidates)
 			for i := 0; i < len(candidates) && i < perDimension; i++ {
 				if strings.TrimSpace(candidates[i].Code) == "" || candidates[i].BetterScore <= 0 {
 					continue
@@ -1187,6 +1449,518 @@ func (s *Service) collectRecommendedFundCodes(referenceCodes []string, perDimens
 		}
 	}
 	return sortedCodeKeys(codeSet)
+}
+
+func upsertFundRecommendationProgressStatus(today string, code string, updates map[string]any) {
+	trimmed := strings.TrimSpace(code)
+	if trimmed == "" {
+		return
+	}
+	result := db.Dao.Model(&FundRecommendationProgress{}).
+		Where("refresh_date = ? AND reference_code = ?", today, trimmed).
+		Updates(updates)
+	if result.Error == nil && result.RowsAffected > 0 {
+		return
+	}
+	row := FundRecommendationProgress{
+		ReferenceCode: trimmed,
+		RefreshDate:   today,
+	}
+	if value, ok := updates["status"].(string); ok {
+		row.Status = value
+	}
+	if value, ok := updates["current_phase"].(string); ok {
+		row.CurrentPhase = value
+	}
+	if value, ok := updates["message"].(string); ok {
+		row.Message = value
+	}
+	if value, ok := updates["last_error"].(string); ok {
+		row.LastError = value
+	}
+	if value, ok := updates["compared_universe"].(int); ok {
+		row.ComparedUniverse = value
+	}
+	if value, ok := updates["universe_total"].(int); ok {
+		row.UniverseTotal = value
+	}
+	db.Dao.Create(&row)
+}
+
+func betterFundDefaultCacheQuery() BetterFundQuery {
+	return BetterFundQuery{
+		FeeFree7:      true,
+		FeeFree30:     true,
+		IncludeAClass: false,
+		OnlyAClass:    false,
+		Page:          1,
+		PageSize:      30,
+	}
+}
+
+func betterFundUnrestrictedCacheQuery() BetterFundQuery {
+	return BetterFundQuery{
+		FeeFree7:      false,
+		FeeFree30:     false,
+		IncludeAClass: true,
+		OnlyAClass:    false,
+		Page:          1,
+		PageSize:      30,
+	}
+}
+
+func sameBetterFundPreferenceProfile(left BetterFundQuery, right BetterFundQuery) bool {
+	return left.FeeFree7 == right.FeeFree7 &&
+		left.FeeFree30 == right.FeeFree30 &&
+		left.IncludeAClass == right.IncludeAClass &&
+		left.OnlyAClass == right.OnlyAClass
+}
+
+func buildBetterFundCacheProfiles(base BetterFundQuery) []BetterFundQuery {
+	profiles := make([]BetterFundQuery, 0, 2)
+
+	preferred := base
+	defaults := betterFundDefaultCacheQuery()
+	preferred.FeeFree7 = defaults.FeeFree7
+	preferred.FeeFree30 = defaults.FeeFree30
+	preferred.IncludeAClass = defaults.IncludeAClass
+	preferred.OnlyAClass = defaults.OnlyAClass
+	profiles = append(profiles, preferred)
+
+	open := base
+	unrestricted := betterFundUnrestrictedCacheQuery()
+	open.FeeFree7 = unrestricted.FeeFree7
+	open.FeeFree30 = unrestricted.FeeFree30
+	open.IncludeAClass = unrestricted.IncludeAClass
+	open.OnlyAClass = unrestricted.OnlyAClass
+	if !sameBetterFundPreferenceProfile(preferred, open) {
+		profiles = append(profiles, open)
+	}
+
+	return profiles
+}
+
+func betterFundCacheFallbackProfiles(query BetterFundQuery) []BetterFundQuery {
+	fallbacks := make([]BetterFundQuery, 0, 2)
+
+	unrestricted := query
+	open := betterFundUnrestrictedCacheQuery()
+	unrestricted.FeeFree7 = open.FeeFree7
+	unrestricted.FeeFree30 = open.FeeFree30
+	unrestricted.IncludeAClass = open.IncludeAClass
+	unrestricted.OnlyAClass = open.OnlyAClass
+	if !sameBetterFundPreferenceProfile(query, unrestricted) {
+		fallbacks = append(fallbacks, unrestricted)
+	}
+
+	preferred := query
+	defaults := betterFundDefaultCacheQuery()
+	preferred.FeeFree7 = defaults.FeeFree7
+	preferred.FeeFree30 = defaults.FeeFree30
+	preferred.IncludeAClass = defaults.IncludeAClass
+	preferred.OnlyAClass = defaults.OnlyAClass
+	if !sameBetterFundPreferenceProfile(query, preferred) && !sameBetterFundPreferenceProfile(unrestricted, preferred) {
+		fallbacks = append(fallbacks, preferred)
+	}
+
+	return fallbacks
+}
+
+func saveFundRecommendationCache(referenceCode string, refreshDate string, query BetterFundQuery, result *BetterFundResult) error {
+	if result == nil {
+		return nil
+	}
+	candidates := result.Candidates
+	if len(candidates) > 30 {
+		candidates = candidates[:30]
+	}
+	payload, err := json.Marshal(candidates)
+	if err != nil {
+		return err
+	}
+
+	cache := FundRecommendationCache{
+		ReferenceCode:    strings.TrimSpace(referenceCode),
+		RefreshDate:      refreshDate,
+		SameTypeOnly:     query.SameTypeOnly,
+		SameSubTypeOnly:  query.SameSubTypeOnly,
+		Dimension:        strings.TrimSpace(query.Dimension),
+		FeeFree7:         query.FeeFree7,
+		FeeFree30:        query.FeeFree30,
+		IncludeAClass:    query.IncludeAClass,
+		OnlyAClass:       query.OnlyAClass,
+		ScopeLabel:       result.ScopeLabel,
+		SortLabel:        result.SortLabel,
+		FallbackApplied:  result.FallbackApplied,
+		ComparedUniverse: result.ComparedUniverse,
+		UniverseTotal:    result.UniverseTotal,
+		DataHint:         result.DataHint,
+		CandidatesJSON:   string(payload),
+	}
+
+	var existing FundRecommendationCache
+	err = db.Dao.Where(
+		"reference_code = ? AND refresh_date = ? AND same_type_only = ? AND IFNULL(same_sub_type_only, 0) = ? AND dimension = ? AND fee_free7 = ? AND fee_free30 = ? AND include_a_class = ? AND IFNULL(only_a_class, 0) = ?",
+		cache.ReferenceCode, cache.RefreshDate, cache.SameTypeOnly, cache.SameSubTypeOnly, cache.Dimension,
+		cache.FeeFree7, cache.FeeFree30, cache.IncludeAClass, cache.OnlyAClass,
+	).First(&existing).Error
+	if err == nil {
+		return db.Dao.Model(&FundRecommendationCache{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{
+				"scope_label":       cache.ScopeLabel,
+				"sort_label":        cache.SortLabel,
+				"fallback_applied":  cache.FallbackApplied,
+				"compared_universe": cache.ComparedUniverse,
+				"universe_total":    cache.UniverseTotal,
+				"data_hint":         cache.DataHint,
+				"candidates_json":   cache.CandidatesJSON,
+			}).Error
+	}
+	return db.Dao.Create(&cache).Error
+}
+
+func loadFundRecommendationCache(referenceCode string, query BetterFundQuery, refreshDate string) (*FundRecommendationCache, bool) {
+	var cache FundRecommendationCache
+	err := db.Dao.
+		Where(
+			"reference_code = ? AND same_type_only = ? AND IFNULL(same_sub_type_only, 0) = ? AND dimension = ? AND fee_free7 = ? AND fee_free30 = ? AND include_a_class = ? AND IFNULL(only_a_class, 0) = ?",
+			strings.TrimSpace(referenceCode), query.SameTypeOnly, query.SameSubTypeOnly, strings.TrimSpace(query.Dimension),
+			query.FeeFree7, query.FeeFree30, query.IncludeAClass, query.OnlyAClass,
+		).
+		Order("CASE WHEN refresh_date = '" + strings.TrimSpace(refreshDate) + "' THEN 0 ELSE 1 END").
+		Order("refresh_date desc").
+		Order("updated_at desc").
+		First(&cache).Error
+	if err != nil {
+		return nil, false
+	}
+	return &cache, cache.RefreshDate == strings.TrimSpace(refreshDate)
+}
+
+func paginateBetterCandidates(candidates []BetterFundCandidate, page int, pageSize int) ([]BetterFundCandidate, int64) {
+	total := int64(len(candidates))
+	start := (page - 1) * pageSize
+	if start > len(candidates) {
+		start = len(candidates)
+	}
+	end := start + pageSize
+	if end > len(candidates) {
+		end = len(candidates)
+	}
+	return candidates[start:end], total
+}
+
+func finalizeBetterFundCandidates(candidates []BetterFundCandidate, universe betterCandidateUniverse) []BetterFundCandidate {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].BetterScore == candidates[j].BetterScore {
+			return candidates[i].Code < candidates[j].Code
+		}
+		return candidates[i].BetterScore > candidates[j].BetterScore
+	})
+	for i := range candidates {
+		candidates[i].RecommendationRank = i + 1
+		if universe.FallbackApplied {
+			candidates[i].Reasons = append([]string{"同类型暂无更优，已放宽到同大类继续筛选"}, candidates[i].Reasons...)
+			candidates[i].ReasonSummary = strings.Join(topStrings(candidates[i].Reasons, 3), " / ")
+			candidates[i].BetterScore = roundPercent(candidates[i].BetterScore * 0.92)
+		}
+	}
+	return candidates
+}
+
+func betterFundCompositeScoreFromMetrics(metrics []BetterFundMetric, candidate bool) float64 {
+	score := 0.0
+	for _, metric := range metrics {
+		var percentile *float64
+		if candidate {
+			percentile = metric.CandidatePercentile
+		} else {
+			percentile = metric.ReferencePercentile
+		}
+		if percentile == nil {
+			continue
+		}
+		score += (*percentile / 100.0) * metric.Weight
+	}
+	return roundPercent(score)
+}
+
+func filterCandidatesStrongerThanReference(candidates []BetterFundCandidate) ([]BetterFundCandidate, bool) {
+	if len(candidates) == 0 {
+		return candidates, false
+	}
+
+	filtered := make([]BetterFundCandidate, 0, len(candidates))
+	referenceBest := true
+	for _, candidate := range candidates {
+		candidateScore := betterFundCompositeScoreFromMetrics(candidate.Metrics, true)
+		referenceScore := betterFundCompositeScoreFromMetrics(candidate.Metrics, false)
+		if candidateScore > referenceScore {
+			filtered = append(filtered, candidate)
+			referenceBest = false
+		}
+	}
+	return filtered, referenceBest
+}
+
+func buildBetterFundResultFromUniverse(reference data.FundBasic, watchlist bool, query BetterFundQuery, universe betterCandidateUniverse, refreshStatus FundRefreshStatus, dataHint string) *BetterFundResult {
+	refItem := buildFundScreenerItem(reference, watchlist)
+	candidates := buildBetterFundCandidates(reference, universe, query.Dimension)
+	candidates = finalizeBetterFundCandidates(candidates, universe)
+	candidates = applyBetterFundPreferenceFilters(candidates, query)
+	comparedUniverse := len(candidates) + 1
+	var referenceBest bool
+	candidates, referenceBest = filterCandidatesStrongerThanReference(candidates)
+	if referenceBest {
+		dataHint = strings.TrimSpace(strings.Join([]string{strings.TrimSpace(dataHint), "当前产品已是当前筛选范围内的更优选择，暂无更优推荐。"}, " "))
+	}
+	pageItems, total := paginateBetterCandidates(candidates, query.Page, query.PageSize)
+	return &BetterFundResult{
+		Reference:        refItem,
+		Candidates:       pageItems,
+		Dimension:        query.Dimension,
+		SortLabel:        betterSortLabel(query.Dimension),
+		ScopeLabel:       universe.ScopeLabel,
+		ComparedUniverse: comparedUniverse,
+		UniverseTotal:    universe.UniverseTotal,
+		RefreshedCount:   universe.RefreshedCount,
+		NetworkRefresh:   universe.NetworkRefresh,
+		FallbackApplied:  universe.FallbackApplied,
+		DataHint:         dataHint,
+		Total:            total,
+		Page:             query.Page,
+		PageSize:         query.PageSize,
+		RefreshStatus:    refreshStatus,
+	}
+}
+
+func buildCachedBetterFundResult(reference data.FundBasic, watchlist bool, query BetterFundQuery, cache *FundRecommendationCache, isToday bool) *BetterFundResult {
+	if cache == nil {
+		return nil
+	}
+
+	var candidates []BetterFundCandidate
+	if strings.TrimSpace(cache.CandidatesJSON) != "" {
+		_ = json.Unmarshal([]byte(cache.CandidatesJSON), &candidates)
+	}
+	candidates = applyBetterFundPreferenceFilters(candidates, query)
+	comparedUniverse := cache.ComparedUniverse
+	if comparedUniverse <= 1 {
+		if parsed := parseComparedUniverseFromHint(cache.DataHint); parsed > 0 {
+			comparedUniverse = parsed
+		}
+	}
+	if comparedUniverse <= 0 {
+		comparedUniverse = len(candidates) + 1
+	}
+	var referenceBest bool
+	candidates, referenceBest = filterCandidatesStrongerThanReference(candidates)
+	pageItems, total := paginateBetterCandidates(candidates, query.Page, query.PageSize)
+	hint := strings.TrimSpace(cache.DataHint)
+	if hint == "" {
+		hint = "推荐结果来自后台已生成的推荐缓存。"
+	}
+	if !isToday {
+		hint = "当前展示的是最近一次缓存结果，今天的推荐缓存还没有完成。"
+	}
+	if referenceBest {
+		hint = strings.TrimSpace(strings.Join([]string{hint, "当前产品已是当前筛选范围内的更优选择，暂无更优推荐。"}, " "))
+	}
+
+	return &BetterFundResult{
+		Reference:        buildFundScreenerItem(reference, watchlist),
+		Candidates:       pageItems,
+		Dimension:        query.Dimension,
+		SortLabel:        defaultLabel(cache.SortLabel, betterSortLabel(query.Dimension)),
+		ScopeLabel:       cache.ScopeLabel,
+		ComparedUniverse: comparedUniverse,
+		UniverseTotal:    cache.UniverseTotal,
+		FallbackApplied:  cache.FallbackApplied,
+		DataHint:         hint,
+		Total:            total,
+		Page:             query.Page,
+		PageSize:         query.PageSize,
+		RefreshStatus: FundRefreshStatus{
+			LastRefreshHint: cache.UpdatedAt.Format("2006-01-02 15:04:05"),
+		},
+	}
+}
+
+func parseComparedUniverseFromHint(hint string) int {
+	hint = strings.TrimSpace(hint)
+	if hint == "" {
+		return 0
+	}
+	patterns := []string{
+		`有效样本\s*(\d+)\s*只`,
+		`样本\s*(\d+)\s*只`,
+	}
+	for _, pattern := range patterns {
+		matches := regexp.MustCompile(pattern).FindStringSubmatch(hint)
+		if len(matches) != 2 {
+			continue
+		}
+		value, err := strconv.Atoi(matches[1])
+		if err == nil && value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func (s *Service) runFundRecommendationRefresh(today string, codes []string) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.SugaredLogger.Errorf("fund recommendation refresh panic: %v", r)
+			logger.SugaredLogger.Errorf("fund recommendation refresh stack: %s", string(debug.Stack()))
+		}
+		recommendationRefreshState.mu.Lock()
+		recommendationRefreshState.refreshing = false
+		recommendationRefreshState.currentCode = ""
+		recommendationRefreshState.lastFinished = time.Now()
+		recommendationRefreshState.mu.Unlock()
+	}()
+
+	activeCodes := dedupeCodes(codes)
+	if len(activeCodes) == 0 {
+		return
+	}
+
+	seedFundRecommendationProgress(today, activeCodes)
+	var rows []FundRecommendationProgress
+	db.Dao.Where("refresh_date = ? AND reference_code IN ?", today, activeCodes).Find(&rows)
+	pendingCodes := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.Status != recommendationStatusCompleted {
+			pendingCodes = append(pendingCodes, strings.TrimSpace(row.ReferenceCode))
+		}
+	}
+	if len(pendingCodes) == 0 {
+		recommendationRefreshState.mu.Lock()
+		recommendationRefreshState.progressTotal = 0
+		recommendationRefreshState.progressNow = 0
+		recommendationRefreshState.mu.Unlock()
+		return
+	}
+
+	recommendationRefreshState.mu.Lock()
+	recommendationRefreshState.progressTotal = int64(len(pendingCodes))
+	recommendationRefreshState.progressNow = 0
+	recommendationRefreshState.mu.Unlock()
+
+	dimensions := []string{"balanced", "higher_return", "lower_drawdown"}
+	for idx, code := range pendingCodes {
+		trimmed := strings.TrimSpace(code)
+		recommendationRefreshState.mu.Lock()
+		recommendationRefreshState.currentCode = trimmed
+		recommendationRefreshState.progressNow = int64(idx)
+		recommendationRefreshState.mu.Unlock()
+
+		upsertFundRecommendationProgressStatus(today, trimmed, map[string]any{
+			"status":        recommendationStatusRunning,
+			"current_phase": "refresh_reference",
+			"message":       "正在补齐参考基金指标",
+			"last_error":    "",
+		})
+
+		reference, err := dbQueryFundBasic(trimmed)
+		if err != nil || reference == nil {
+			if !s.refreshFundScreeningMetrics(trimmed) {
+				upsertFundRecommendationProgressStatus(today, trimmed, map[string]any{
+					"status":        recommendationStatusFailed,
+					"current_phase": "refresh_reference",
+					"last_error":    "参考基金指标刷新失败",
+					"message":       "参考基金指标刷新失败",
+				})
+				continue
+			}
+			reference, err = dbQueryFundBasic(trimmed)
+		}
+		if err != nil || reference == nil {
+			upsertFundRecommendationProgressStatus(today, trimmed, map[string]any{
+				"status":        recommendationStatusFailed,
+				"current_phase": "refresh_reference",
+				"last_error":    "未找到参考基金基础数据",
+				"message":       "未找到参考基金基础数据",
+			})
+			continue
+		}
+
+		if !isSameTradingDayString(reference.ScreenUpdatedAt, time.Now()) {
+			s.refreshFundScreeningMetrics(trimmed)
+			if refreshed, queryErr := dbQueryFundBasic(trimmed); queryErr == nil && refreshed != nil {
+				reference = refreshed
+			}
+		}
+
+		upsertFundRecommendationProgressStatus(today, trimmed, map[string]any{
+			"status":        recommendationStatusRunning,
+			"current_phase": "refresh_candidates",
+			"message":       "正在补齐同类候选基金指标",
+		})
+
+		refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
+		exactUniverse, _ := s.refreshBetterFundUniverse(*reference, refCategory.Category, true, false)
+		exactHint := betterDataHint(FundRefreshStatus{}, exactUniverse)
+
+		query := BetterFundQuery{
+			ReferenceCode:   trimmed,
+			SameTypeOnly:    true,
+			SameSubTypeOnly: false,
+			Page:            1,
+			PageSize:        30,
+		}
+		for _, dimension := range dimensions {
+			query.Dimension = dimension
+			for _, cacheQuery := range buildBetterFundCacheProfiles(query) {
+				result := buildBetterFundResultFromUniverse(*reference, isFundWatchlisted(trimmed), cacheQuery, exactUniverse, FundRefreshStatus{}, exactHint)
+				if err := saveFundRecommendationCache(trimmed, today, cacheQuery, result); err != nil {
+					logger.SugaredLogger.Warnf("save exact recommendation cache failed for %s/%s: %v", trimmed, dimension, err)
+				}
+			}
+		}
+
+		subTypeUniverse, _ := s.refreshBetterFundUniverse(*reference, refCategory.Category, true, true)
+		subTypeHint := betterDataHint(FundRefreshStatus{}, subTypeUniverse)
+		query.SameSubTypeOnly = true
+		for _, dimension := range dimensions {
+			query.Dimension = dimension
+			for _, cacheQuery := range buildBetterFundCacheProfiles(query) {
+				result := buildBetterFundResultFromUniverse(*reference, isFundWatchlisted(trimmed), cacheQuery, subTypeUniverse, FundRefreshStatus{}, subTypeHint)
+				if err := saveFundRecommendationCache(trimmed, today, cacheQuery, result); err != nil {
+					logger.SugaredLogger.Warnf("save subtype recommendation cache failed for %s/%s: %v", trimmed, dimension, err)
+				}
+			}
+		}
+
+		wideUniverse := loadBetterFundUniverseDetailed(*reference, refCategory.Category, false, false)
+		wideHint := "推荐缓存基于今日已落库的基金指标生成。"
+		query.SameTypeOnly = false
+		query.SameSubTypeOnly = false
+		for _, dimension := range dimensions {
+			query.Dimension = dimension
+			for _, cacheQuery := range buildBetterFundCacheProfiles(query) {
+				result := buildBetterFundResultFromUniverse(*reference, isFundWatchlisted(trimmed), cacheQuery, wideUniverse, FundRefreshStatus{}, wideHint)
+				if err := saveFundRecommendationCache(trimmed, today, cacheQuery, result); err != nil {
+					logger.SugaredLogger.Warnf("save wide recommendation cache failed for %s/%s: %v", trimmed, dimension, err)
+				}
+			}
+		}
+
+		upsertFundRecommendationProgressStatus(today, trimmed, map[string]any{
+			"status":            recommendationStatusCompleted,
+			"current_phase":     "",
+			"message":           "今日推荐缓存已完成",
+			"compared_universe": exactUniverse.ComparedUniverse,
+			"universe_total":    exactUniverse.UniverseTotal,
+			"last_error":        "",
+		})
+
+		recommendationRefreshState.mu.Lock()
+		recommendationRefreshState.progressNow = int64(idx + 1)
+		recommendationRefreshState.mu.Unlock()
+	}
 }
 
 func dedupeCodes(codes []string) []string {
@@ -1319,6 +2093,12 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 		query.PageSize = 50
 	}
 	query.Dimension = normalizeBetterFundDimension(query.Dimension)
+	if query.SameSubTypeOnly {
+		query.SameTypeOnly = true
+	}
+	if query.OnlyAClass {
+		query.IncludeAClass = true
+	}
 
 	var reference data.FundBasic
 	if err := db.Dao.Where("code = ?", code).First(&reference).Error; err != nil {
@@ -1334,10 +2114,20 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 	refItem := buildFundScreenerItem(reference, isFundWatchlisted(code))
 	refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
 	refreshStatus := s.ensureFundScreenerFreshAsync(0)
-	universe := loadBetterFundUniverse(reference, refCategory.Category, query.SameTypeOnly)
+	universe := loadBetterFundUniverseDetailed(reference, refCategory.Category, query.SameTypeOnly, query.SameSubTypeOnly)
+	if query.NetworkRefresh {
+		refreshedUniverse, refreshStats := s.refreshBetterFundUniverse(reference, refCategory.Category, query.SameTypeOnly, query.SameSubTypeOnly)
+		refreshedUniverse.NetworkRefresh = refreshStats.NetworkRefresh
+		refreshedUniverse.RefreshedCount = refreshStats.RefreshedCount
+		if refreshStats.UniverseTotal > 0 {
+			refreshedUniverse.UniverseTotal = refreshStats.UniverseTotal
+		}
+		refreshedUniverse.Limited = refreshStats.Limited
+		universe = refreshedUniverse
+	}
 	candidates := buildBetterFundCandidates(reference, universe, query.Dimension)
 	if false && query.SameTypeOnly && len(candidates) == 0 {
-		candidates = loadBetterFundCandidates(reference, refCategory.Category, query.Dimension, false)
+		candidates = loadBetterFundCandidates(reference, refCategory.Category, query.Dimension, false, false)
 		for i := range candidates {
 			candidates[i].Reasons = append([]string{"同类型暂无更优，已放宽到同大类继续筛选"}, candidates[i].Reasons...)
 			candidates[i].BetterScore = roundPercent(candidates[i].BetterScore * 0.92)
@@ -1376,6 +2166,9 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 		SortLabel:        betterSortLabel(query.Dimension),
 		ScopeLabel:       universe.ScopeLabel,
 		ComparedUniverse: universe.ComparedUniverse,
+		UniverseTotal:    universe.UniverseTotal,
+		RefreshedCount:   universe.RefreshedCount,
+		NetworkRefresh:   universe.NetworkRefresh,
 		FallbackApplied:  universe.FallbackApplied,
 		DataHint:         betterDataHint(refreshStatus, universe),
 		Total:            total,
@@ -1383,6 +2176,68 @@ func (s *Service) GetBetterFunds(query BetterFundQuery) *BetterFundResult {
 		PageSize:         query.PageSize,
 		RefreshStatus:    refreshStatus,
 	}
+}
+
+func (s *Service) GetBetterFundsCached(query BetterFundQuery) *BetterFundResult {
+	code := strings.TrimSpace(query.ReferenceCode)
+	if code == "" {
+		return nil
+	}
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.PageSize <= 0 {
+		query.PageSize = 10
+	}
+	if query.PageSize > 50 {
+		query.PageSize = 50
+	}
+	query.Dimension = normalizeBetterFundDimension(query.Dimension)
+	if query.SameSubTypeOnly {
+		query.SameTypeOnly = true
+	}
+	if query.OnlyAClass {
+		query.IncludeAClass = true
+	}
+	today := time.Now().Format("2006-01-02")
+
+	if query.NetworkRefresh {
+		s.GetFundRecommendationRefreshStatus(true)
+	}
+
+	var reference data.FundBasic
+	if err := db.Dao.Where("code = ?", code).First(&reference).Error; err != nil {
+		return nil
+	}
+
+	if query.NetworkRefresh {
+		refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
+		refreshStatus := s.buildFundRefreshStatus(s.EnsureFundUniverse())
+		universe, _ := s.refreshBetterFundUniverse(reference, refCategory.Category, query.SameTypeOnly, query.SameSubTypeOnly)
+		result := buildBetterFundResultFromUniverse(reference, isFundWatchlisted(code), query, universe, refreshStatus, betterDataHint(refreshStatus, universe))
+		if err := saveFundRecommendationCache(code, today, query, result); err != nil {
+			logger.SugaredLogger.Warnf("save refreshed recommendation cache failed for %s/%s: %v", code, query.Dimension, err)
+		}
+		return result
+	}
+
+	if cache, isToday := loadFundRecommendationCache(code, query, today); cache != nil {
+		return buildCachedBetterFundResult(reference, isFundWatchlisted(code), query, cache, isToday)
+	}
+	for _, fallbackQuery := range betterFundCacheFallbackProfiles(query) {
+		if cache, isToday := loadFundRecommendationCache(code, fallbackQuery, today); cache != nil {
+			return buildCachedBetterFundResult(reference, isFundWatchlisted(code), query, cache, isToday)
+		}
+	}
+
+	refCategory := classifyFundType(defaultLabel(reference.Type, reference.Name))
+	refreshStatus := s.buildFundRefreshStatus(s.EnsureFundUniverse())
+	universe := loadBetterFundUniverseDetailed(reference, refCategory.Category, query.SameTypeOnly, query.SameSubTypeOnly)
+	dataHint := "今日推荐缓存尚未完成，当前先展示本地已落库的基金指标结果。"
+	if universe.ComparedUniverse <= 1 {
+		dataHint = "当前推荐缓存尚未完成，且本地可比较样本还不足，请等待后台推荐检索完成。"
+	}
+	return buildBetterFundResultFromUniverse(reference, isFundWatchlisted(code), query, universe, refreshStatus, dataHint)
 }
 
 func (s *Service) CompareFunds(query FundCompareQuery) *FundCompareResult {
@@ -1446,18 +2301,265 @@ func (s *Service) CompareFunds(query FundCompareQuery) *FundCompareResult {
 	}
 }
 
-func loadBetterFundCandidates(reference data.FundBasic, refCategory string, dimension string, sameTypeOnly bool) []BetterFundCandidate {
-	dbQuery := db.Dao.Model(&data.FundBasic{}).
-		Where("code <> ?", reference.Code).
-		Where("screen_updated_at IS NOT NULL AND screen_updated_at <> ''")
-	if sameTypeOnly && strings.TrimSpace(reference.Type) != "" {
-		dbQuery = dbQuery.Where("type = ?", reference.Type)
-	} else {
-		dbQuery = applyFundCategoryDBFilter(dbQuery, refCategory)
+func normalizeBetterFundSubType(value string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	if normalized == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\r", "",
+		"\n", "",
+		"（", "",
+		"）", "",
+		"(", "",
+		")", "",
+		"-", "",
+		"_", "",
+		"·", "",
+		"，", "",
+		",", "",
+		"跟踪标的", "",
+		"标的", "",
+		"指数", "",
+		"ETF联接", "",
+		"ETF", "",
+		"联接基金", "",
+		"联接", "",
+		"增强", "",
+		"基金", "",
+	)
+	return strings.TrimSpace(replacer.Replace(normalized))
+}
+
+func betterFundSubTypeLabel(fund data.FundBasic) string {
+	return strings.TrimSpace(fund.TrackingTarget)
+}
+
+func betterFundSubTypeKey(fund data.FundBasic) string {
+	return normalizeBetterFundSubType(fund.TrackingTarget)
+}
+
+func filterBetterFundBasicsBySubType(reference data.FundBasic, basics []data.FundBasic) []data.FundBasic {
+	refKey := betterFundSubTypeKey(reference)
+	if refKey == "" || len(basics) == 0 {
+		return basics
+	}
+
+	filtered := make([]data.FundBasic, 0, len(basics))
+	for _, basic := range basics {
+		if betterFundSubTypeKey(basic) == refKey {
+			filtered = append(filtered, basic)
+		}
+	}
+	return filtered
+}
+
+func fundSupportsSubTypeFilter(fund data.FundBasic) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(fund.Type))
+	if normalized == "" {
+		return strings.TrimSpace(fund.TrackingTarget) != ""
+	}
+	return strings.Contains(normalized, "指数") ||
+		strings.Contains(normalized, "ETF") ||
+		strings.Contains(normalized, "联接") ||
+		strings.Contains(normalized, "增强") ||
+		strings.TrimSpace(fund.TrackingTarget) != ""
+}
+
+func normalizeBetterFundTypeKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parts := strings.SplitN(value, "|", 2); len(parts) > 0 {
+		value = strings.TrimSpace(parts[0])
+	}
+	return value
+}
+
+func fundShareClassSuffix(name string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(name))
+	if normalized == "" {
+		return ""
+	}
+	match := regexp.MustCompile(`([A-Z])$`).FindStringSubmatch(normalized)
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
+}
+
+func queryOnlineBetterFundSeeds(reference data.FundBasic, refCategory string, exactType bool) []data.FundCatalogItem {
+	catalog, err := data.NewFundApi().GetEastmoneyFundCatalog(false)
+	if err != nil || len(catalog) == 0 {
+		return []data.FundCatalogItem{}
+	}
+
+	refType := normalizeBetterFundTypeKey(reference.Type)
+	items := make([]data.FundCatalogItem, 0, len(catalog))
+	for _, item := range catalog {
+		if strings.TrimSpace(item.Code) == "" || strings.TrimSpace(item.Code) == strings.TrimSpace(reference.Code) {
+			continue
+		}
+		itemType := normalizeBetterFundTypeKey(item.Type)
+		if exactType && refType != "" {
+			if itemType != refType {
+				continue
+			}
+		} else {
+			classification := classifyFundType(defaultLabel(itemType, item.Name))
+			if classification.Category != refCategory {
+				continue
+			}
+		}
+		items = append(items, data.FundCatalogItem{
+			Code: strings.TrimSpace(item.Code),
+			Name: strings.TrimSpace(item.Name),
+			Type: itemType,
+		})
+	}
+	return items
+}
+
+func loadFundBasicsMapByCodes(codes []string) map[string]data.FundBasic {
+	if len(codes) == 0 {
+		return map[string]data.FundBasic{}
 	}
 
 	var basics []data.FundBasic
-	dbQuery.Order("updated_at desc").Order("code asc").Find(&basics)
+	db.Dao.Where("code IN ?", dedupeCodes(codes)).Find(&basics)
+	result := make(map[string]data.FundBasic, len(basics))
+	for _, basic := range basics {
+		result[strings.TrimSpace(basic.Code)] = basic
+	}
+	return result
+}
+
+func ensureFundBasicShells(entries []data.FundCatalogItem) {
+	if len(entries) == 0 {
+		return
+	}
+
+	codes := make([]string, 0, len(entries))
+	for _, item := range entries {
+		if trimmed := strings.TrimSpace(item.Code); trimmed != "" {
+			codes = append(codes, trimmed)
+		}
+	}
+	if len(codes) == 0 {
+		return
+	}
+
+	var existing []string
+	db.Dao.Model(&data.FundBasic{}).Where("code IN ?", dedupeCodes(codes)).Pluck("code", &existing)
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, code := range existing {
+		existingSet[strings.TrimSpace(code)] = struct{}{}
+	}
+
+	for _, item := range entries {
+		code := strings.TrimSpace(item.Code)
+		if code == "" {
+			continue
+		}
+		if _, ok := existingSet[code]; ok {
+			continue
+		}
+		db.Dao.Create(&data.FundBasic{
+			Code: code,
+			Name: strings.TrimSpace(item.Name),
+			Type: normalizeBetterFundTypeKey(item.Type),
+		})
+	}
+}
+
+func prioritizeBetterFundSeedEntries(reference data.FundBasic, seeds []data.FundCatalogItem, basics map[string]data.FundBasic) []data.FundCatalogItem {
+	if len(seeds) <= 1 {
+		return seeds
+	}
+
+	refShare := fundShareClassSuffix(reference.Name)
+	preferredProfile := betterFundDefaultCacheQuery()
+	prioritized := append([]data.FundCatalogItem(nil), seeds...)
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		left := prioritized[i]
+		right := prioritized[j]
+
+		leftBasic, leftExists := basics[left.Code]
+		rightBasic, rightExists := basics[right.Code]
+
+		leftScore := 0
+		rightScore := 0
+		if leftExists {
+			leftScore -= 4
+			if isUsableBetterFundCandidate(leftBasic) {
+				leftScore -= 6
+			}
+		}
+		if rightExists {
+			rightScore -= 4
+			if isUsableBetterFundCandidate(rightBasic) {
+				rightScore -= 6
+			}
+		}
+		if refShare != "" {
+			if fundShareClassSuffix(left.Name) == refShare {
+				leftScore -= 3
+			}
+			if fundShareClassSuffix(right.Name) == refShare {
+				rightScore -= 3
+			}
+		}
+		if !preferredProfile.IncludeAClass {
+			if isAFundShareClass(left.Name) {
+				leftScore += 6
+			} else {
+				leftScore -= 2
+			}
+			if isAFundShareClass(right.Name) {
+				rightScore += 6
+			} else {
+				rightScore -= 2
+			}
+		}
+		if preferredProfile.FeeFree7 || preferredProfile.FeeFree30 {
+			if leftExists {
+				switch {
+				case preferredProfile.FeeFree7 && leftBasic.RedeemFeeFreeDays > 0 && leftBasic.RedeemFeeFreeDays <= 7:
+					leftScore -= 5
+				case preferredProfile.FeeFree30 && leftBasic.RedeemFeeFreeDays > 7 && leftBasic.RedeemFeeFreeDays <= 30:
+					leftScore -= 3
+				case leftBasic.RedeemFeeFreeDays > 0:
+					leftScore += 3
+				default:
+					leftScore += 1
+				}
+			}
+			if rightExists {
+				switch {
+				case preferredProfile.FeeFree7 && rightBasic.RedeemFeeFreeDays > 0 && rightBasic.RedeemFeeFreeDays <= 7:
+					rightScore -= 5
+				case preferredProfile.FeeFree30 && rightBasic.RedeemFeeFreeDays > 7 && rightBasic.RedeemFeeFreeDays <= 30:
+					rightScore -= 3
+				case rightBasic.RedeemFeeFreeDays > 0:
+					rightScore += 3
+				default:
+					rightScore += 1
+				}
+			}
+		}
+		if leftScore == rightScore {
+			return left.Code < right.Code
+		}
+		return leftScore < rightScore
+	})
+	return prioritized
+}
+
+func loadBetterFundCandidates(reference data.FundBasic, refCategory string, dimension string, sameTypeOnly bool, sameSubTypeOnly bool) []BetterFundCandidate {
+	basics := queryBetterFundBasics(reference, refCategory, sameTypeOnly && strings.TrimSpace(reference.Type) != "", sameSubTypeOnly)
 
 	watchlistMap := loadFundWatchlistMap(basics)
 	candidates := make([]BetterFundCandidate, 0, len(basics))
@@ -1470,9 +2572,30 @@ func loadBetterFundCandidates(reference data.FundBasic, refCategory string, dime
 	return candidates
 }
 
-func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTypeOnly bool) betterCandidateUniverse {
+func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTypeOnly bool, sameSubTypeOnly bool) betterCandidateUniverse {
+	if sameSubTypeOnly {
+		sameTypeOnly = true
+	}
+	if sameSubTypeOnly {
+		subTypeLabel := betterFundSubTypeLabel(reference)
+		if subTypeLabel != "" {
+			basics := queryBetterFundBasics(reference, refCategory, true, true)
+			return betterCandidateUniverse{
+				Basics:           basics,
+				ScopeLabel:       "同子类型精确匹配：" + subTypeLabel,
+				ComparedUniverse: len(basics) + 1,
+			}
+		}
+
+		basics := queryBetterFundBasics(reference, refCategory, true, false)
+		return betterCandidateUniverse{
+			Basics:           basics,
+			ScopeLabel:       "参考基金暂无明确子类型，已按同类型匹配：" + strings.TrimSpace(reference.Type),
+			ComparedUniverse: len(basics) + 1,
+		}
+	}
 	if sameTypeOnly && strings.TrimSpace(reference.Type) != "" {
-		basics := queryBetterFundBasics(reference, refCategory, true)
+		basics := queryBetterFundBasics(reference, refCategory, true, false)
 		if len(basics) > 0 {
 			return betterCandidateUniverse{
 				Basics:           basics,
@@ -1480,7 +2603,7 @@ func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTy
 				ComparedUniverse: len(basics) + 1,
 			}
 		}
-		basics = queryBetterFundBasics(reference, refCategory, false)
+		basics = queryBetterFundBasics(reference, refCategory, false, false)
 		return betterCandidateUniverse{
 			Basics:           basics,
 			ScopeLabel:       "同类型暂无更优，已放宽到同大类：" + betterCategoryLabel(refCategory),
@@ -1489,7 +2612,7 @@ func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTy
 		}
 	}
 
-	basics := queryBetterFundBasics(reference, refCategory, false)
+	basics := queryBetterFundBasics(reference, refCategory, false, false)
 	return betterCandidateUniverse{
 		Basics:           basics,
 		ScopeLabel:       "同大类匹配：" + betterCategoryLabel(refCategory),
@@ -1497,7 +2620,30 @@ func loadBetterFundUniverse(reference data.FundBasic, refCategory string, sameTy
 	}
 }
 
-func queryBetterFundBasics(reference data.FundBasic, refCategory string, exactType bool) []data.FundBasic {
+func queryBetterFundBasics(reference data.FundBasic, refCategory string, exactType bool, sameSubTypeOnly bool) []data.FundBasic {
+	if exactType {
+		seedEntries := queryOnlineBetterFundSeeds(reference, refCategory, true)
+		if len(seedEntries) > 0 {
+			codes := make([]string, 0, len(seedEntries))
+			for _, item := range seedEntries {
+				if trimmed := strings.TrimSpace(item.Code); trimmed != "" {
+					codes = append(codes, trimmed)
+				}
+			}
+			basicMap := loadFundBasicsMapByCodes(codes)
+			basics := make([]data.FundBasic, 0, len(seedEntries))
+			for _, item := range seedEntries {
+				if basic, ok := basicMap[item.Code]; ok && strings.TrimSpace(basic.ScreenUpdatedAt) != "" {
+					basics = append(basics, basic)
+				}
+			}
+			if sameSubTypeOnly {
+				basics = filterBetterFundBasicsBySubType(reference, basics)
+			}
+			return basics
+		}
+	}
+
 	dbQuery := db.Dao.Model(&data.FundBasic{}).
 		Where("code <> ?", reference.Code).
 		Where("screen_updated_at IS NOT NULL AND screen_updated_at <> ''")
@@ -1509,7 +2655,317 @@ func queryBetterFundBasics(reference data.FundBasic, refCategory string, exactTy
 
 	var basics []data.FundBasic
 	dbQuery.Order("updated_at desc").Order("code asc").Find(&basics)
+	if sameSubTypeOnly {
+		basics = filterBetterFundBasicsBySubType(reference, basics)
+	}
 	return basics
+}
+
+func loadBetterFundUniverseDetailed(reference data.FundBasic, refCategory string, sameTypeOnly bool, sameSubTypeOnly bool) betterCandidateUniverse {
+	universe := loadBetterFundUniverse(reference, refCategory, sameTypeOnly, sameSubTypeOnly)
+	if sameSubTypeOnly {
+		if betterFundSubTypeKey(reference) != "" {
+			universe.UniverseTotal = countBetterFundUniverse(reference, refCategory, true, true) + 1
+			return universe
+		}
+		universe.UniverseTotal = countBetterFundUniverse(reference, refCategory, true, false) + 1
+		return universe
+	}
+	if sameTypeOnly && strings.TrimSpace(reference.Type) != "" {
+		universe.UniverseTotal = countBetterFundUniverse(reference, refCategory, true, false) + 1
+		if len(universe.Basics) == 0 {
+			universe.UniverseTotal = countBetterFundUniverse(reference, refCategory, false, false) + 1
+		}
+		return universe
+	}
+	universe.UniverseTotal = countBetterFundUniverse(reference, refCategory, false, false) + 1
+	return universe
+}
+
+func queryBetterFundUniverseSeeds(reference data.FundBasic, refCategory string, exactType bool, sameSubTypeOnly bool, limit int) []data.FundBasic {
+	if exactType {
+		seedEntries := queryOnlineBetterFundSeeds(reference, refCategory, true)
+		if len(seedEntries) > 0 {
+			if limit > 0 && len(seedEntries) > limit {
+				seedEntries = seedEntries[:limit]
+			}
+			codes := make([]string, 0, len(seedEntries))
+			for _, item := range seedEntries {
+				codes = append(codes, item.Code)
+			}
+			basicMap := loadFundBasicsMapByCodes(codes)
+			basics := make([]data.FundBasic, 0, len(seedEntries))
+			for _, item := range seedEntries {
+				if basic, ok := basicMap[item.Code]; ok {
+					basics = append(basics, basic)
+				}
+			}
+			if sameSubTypeOnly {
+				basics = filterBetterFundBasicsBySubType(reference, basics)
+			}
+			return basics
+		}
+	}
+
+	dbQuery := db.Dao.Model(&data.FundBasic{}).
+		Where("code <> ?", reference.Code)
+	if exactType && strings.TrimSpace(reference.Type) != "" {
+		dbQuery = dbQuery.Where("type = ?", reference.Type)
+	} else {
+		dbQuery = applyFundCategoryDBFilter(dbQuery, refCategory)
+	}
+	if limit > 0 {
+		dbQuery = dbQuery.Limit(limit)
+	}
+
+	var basics []data.FundBasic
+	dbQuery.Order("updated_at desc").Order("code asc").Find(&basics)
+	if sameSubTypeOnly {
+		basics = filterBetterFundBasicsBySubType(reference, basics)
+	}
+	if limit > 0 && len(basics) > limit {
+		basics = basics[:limit]
+	}
+	return basics
+}
+
+func countBetterFundUniverse(reference data.FundBasic, refCategory string, exactType bool, sameSubTypeOnly bool) int {
+	if exactType {
+		seedEntries := queryOnlineBetterFundSeeds(reference, refCategory, true)
+		if sameSubTypeOnly {
+			basics := queryBetterFundBasics(reference, refCategory, true, true)
+			return len(basics)
+		}
+		if len(seedEntries) > 0 {
+			return len(seedEntries)
+		}
+	}
+
+	if sameSubTypeOnly {
+		return len(queryBetterFundBasics(reference, refCategory, exactType, true))
+	}
+	var count int64
+	dbQuery := db.Dao.Model(&data.FundBasic{}).
+		Where("code <> ?", reference.Code)
+	if exactType && strings.TrimSpace(reference.Type) != "" {
+		dbQuery = dbQuery.Where("type = ?", reference.Type)
+	} else {
+		dbQuery = applyFundCategoryDBFilter(dbQuery, refCategory)
+	}
+	dbQuery.Count(&count)
+	return int(count)
+}
+
+func shouldRefreshBetterFundCandidate(basic data.FundBasic, today time.Time) bool {
+	if !isSameTradingDayString(basic.ScreenUpdatedAt, today) {
+		return true
+	}
+	return basic.NetGrowth3 == nil ||
+		basic.NetGrowth6 == nil ||
+		basic.NetGrowth12 == nil ||
+		(fundSupportsSubTypeFilter(basic) && betterFundSubTypeKey(basic) == "") ||
+		basic.MaxDrawdown3 == nil ||
+		basic.MaxDrawdown6 == nil ||
+		basic.MaxDrawdown12 == nil ||
+		basic.Sharpe12 == nil ||
+		basic.Calmar12 == nil ||
+		basic.StageRank1M <= 0 ||
+		basic.StageRank1MTotal <= 0 ||
+		basic.StageRank3M <= 0 ||
+		basic.StageRank3MTotal <= 0 ||
+		basic.StageRank6M <= 0 ||
+		basic.StageRank6MTotal <= 0 ||
+		basic.StageRank12M <= 0 ||
+		basic.StageRank12MTotal <= 0 ||
+		basic.RedeemFeeFreeDays <= 0
+}
+
+func isUsableBetterFundCandidate(basic data.FundBasic) bool {
+	return basic.NetGrowth3 != nil &&
+		basic.NetGrowth6 != nil &&
+		basic.NetGrowth12 != nil &&
+		basic.MaxDrawdown3 != nil &&
+		basic.MaxDrawdown6 != nil &&
+		basic.MaxDrawdown12 != nil &&
+		basic.Sharpe12 != nil &&
+		basic.Calmar12 != nil
+}
+
+func buildBetterUniverseFromSeedEntries(reference data.FundBasic, entries []data.FundCatalogItem, sameSubTypeOnly bool) betterCandidateUniverse {
+	now := time.Now()
+	codes := make([]string, 0, len(entries))
+	for _, item := range entries {
+		if trimmed := strings.TrimSpace(item.Code); trimmed != "" {
+			codes = append(codes, trimmed)
+		}
+	}
+	basicMap := loadFundBasicsMapByCodes(codes)
+	basics := make([]data.FundBasic, 0, len(entries))
+	for _, item := range entries {
+		basic, ok := basicMap[item.Code]
+		if !ok || strings.TrimSpace(basic.ScreenUpdatedAt) == "" || shouldRefreshBetterFundCandidate(basic, now) {
+			continue
+		}
+		basics = append(basics, basic)
+	}
+	if sameSubTypeOnly {
+		basics = filterBetterFundBasicsBySubType(reference, basics)
+	}
+	scopeLabel := "同类型精确匹配：" + strings.TrimSpace(reference.Type)
+	if sameSubTypeOnly {
+		if subTypeLabel := betterFundSubTypeLabel(reference); subTypeLabel != "" {
+			scopeLabel = "同子类型精确匹配：" + subTypeLabel
+		} else {
+			scopeLabel = "参考基金暂无明确子类型，已按同类型匹配：" + strings.TrimSpace(reference.Type)
+		}
+	}
+	return betterCandidateUniverse{
+		Basics:           basics,
+		ScopeLabel:       scopeLabel,
+		ComparedUniverse: len(basics) + 1,
+		UniverseTotal:    len(entries) + 1,
+	}
+}
+
+func hasEnoughBetterCandidatesForDailyCache(reference data.FundBasic, universe betterCandidateUniverse) bool {
+	if len(universe.Basics) == 0 {
+		return false
+	}
+	defaultQuery := betterFundDefaultCacheQuery()
+	for _, dimension := range []string{"balanced", "higher_return", "lower_drawdown"} {
+		defaultQuery.Dimension = dimension
+		candidates := buildBetterFundCandidates(reference, universe, dimension)
+		candidates = finalizeBetterFundCandidates(candidates, universe)
+		candidates = applyBetterFundPreferenceFilters(candidates, defaultQuery)
+		candidates, _ = filterCandidatesStrongerThanReference(candidates)
+		if len(candidates) < betterFundTargetPerDimension {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) refreshBetterFundUniverse(reference data.FundBasic, refCategory string, sameTypeOnly bool, sameSubTypeOnly bool) (betterCandidateUniverse, betterUniverseRefreshStats) {
+	stats := betterUniverseRefreshStats{NetworkRefresh: true}
+	today := time.Now()
+
+	if sameSubTypeOnly {
+		sameTypeOnly = true
+	}
+	exactType := sameTypeOnly && strings.TrimSpace(reference.Type) != ""
+	if exactType {
+		seedEntries := queryOnlineBetterFundSeeds(reference, refCategory, true)
+		if len(seedEntries) > 0 {
+			stats.UniverseTotal = len(seedEntries) + 1
+			localBasics := loadFundBasicsMapByCodes(func() []string {
+				codes := make([]string, 0, len(seedEntries))
+				for _, item := range seedEntries {
+					codes = append(codes, item.Code)
+				}
+				return codes
+			}())
+			prioritized := prioritizeBetterFundSeedEntries(reference, seedEntries, localBasics)
+			initialUniverse := buildBetterUniverseFromSeedEntries(reference, seedEntries, sameSubTypeOnly)
+			if hasEnoughBetterCandidatesForDailyCache(reference, initialUniverse) {
+				initialUniverse.NetworkRefresh = true
+				initialUniverse.UniverseTotal = stats.UniverseTotal
+				return initialUniverse, stats
+			}
+
+			pendingEntries := make([]data.FundCatalogItem, 0, len(prioritized))
+			for _, item := range prioritized {
+				basic, ok := localBasics[item.Code]
+				if ok && isUsableBetterFundCandidate(basic) && !shouldRefreshBetterFundCandidate(basic, today) {
+					continue
+				}
+				pendingEntries = append(pendingEntries, item)
+			}
+
+			probeEntries := pendingEntries
+			if len(probeEntries) > betterFundRefreshProbeBudget {
+				probeEntries = probeEntries[:betterFundRefreshProbeBudget]
+				stats.Limited = true
+			}
+			ensureFundBasicShells(probeEntries)
+
+			for _, item := range probeEntries {
+				if s.refreshFundScreeningMetrics(item.Code) {
+					stats.RefreshedCount++
+				}
+				currentUniverse := buildBetterUniverseFromSeedEntries(reference, seedEntries, sameSubTypeOnly)
+				if hasEnoughBetterCandidatesForDailyCache(reference, currentUniverse) {
+					currentUniverse.NetworkRefresh = true
+					currentUniverse.RefreshedCount = stats.RefreshedCount
+					currentUniverse.UniverseTotal = stats.UniverseTotal
+					currentUniverse.Limited = stats.Limited
+					return currentUniverse, stats
+				}
+			}
+
+			universe := buildBetterUniverseFromSeedEntries(reference, seedEntries, sameSubTypeOnly)
+			universe.NetworkRefresh = true
+			universe.RefreshedCount = stats.RefreshedCount
+			universe.UniverseTotal = stats.UniverseTotal
+			universe.Limited = stats.Limited
+			if len(universe.Basics) > 0 {
+				return universe, stats
+			}
+		}
+	}
+
+	seeds := queryBetterFundUniverseSeeds(reference, refCategory, exactType, sameSubTypeOnly, 0)
+	if exactType && len(seeds) == 0 {
+		exactType = false
+		seeds = queryBetterFundUniverseSeeds(reference, refCategory, false, false, 0)
+	}
+
+	stats.UniverseTotal = len(seeds) + 1
+	if len(seeds) == 0 {
+		universe := loadBetterFundUniverseDetailed(reference, refCategory, sameTypeOnly, sameSubTypeOnly)
+		universe.NetworkRefresh = true
+		universe.UniverseTotal = stats.UniverseTotal
+		return universe, stats
+	}
+
+	targetSeeds := seeds
+	if len(targetSeeds) > betterFundRefreshCap {
+		targetSeeds = targetSeeds[:betterFundRefreshCap]
+		stats.Limited = true
+	}
+
+	targetUsable := 80
+	if !sameTypeOnly {
+		targetUsable = 120
+	}
+
+	usableCount := 0
+	pendingCodes := make([]string, 0, len(targetSeeds))
+	for _, basic := range targetSeeds {
+		if isUsableBetterFundCandidate(basic) && !shouldRefreshBetterFundCandidate(basic, today) {
+			usableCount++
+			continue
+		}
+		pendingCodes = append(pendingCodes, basic.Code)
+	}
+
+	for _, code := range pendingCodes {
+		if usableCount >= targetUsable {
+			break
+		}
+		if s.refreshFundScreeningMetrics(code) {
+			stats.RefreshedCount++
+			if refreshed, err := dbQueryFundBasic(code); err == nil && refreshed != nil && isUsableBetterFundCandidate(*refreshed) {
+				usableCount++
+			}
+		}
+	}
+
+	universe := loadBetterFundUniverseDetailed(reference, refCategory, sameTypeOnly, sameSubTypeOnly)
+	universe.NetworkRefresh = true
+	universe.RefreshedCount = stats.RefreshedCount
+	universe.UniverseTotal = stats.UniverseTotal
+	universe.Limited = stats.Limited
+	return universe, stats
 }
 
 func buildBetterFundCandidates(reference data.FundBasic, universe betterCandidateUniverse, dimension string) []BetterFundCandidate {
@@ -1517,7 +2973,7 @@ func buildBetterFundCandidates(reference data.FundBasic, universe betterCandidat
 		return []BetterFundCandidate{}
 	}
 
-	specs := betterMetricSpecsForDimension(dimension)
+	specs := betterMetricSpecsForDimensionV2(dimension)
 	rankUniverse := make([]data.FundBasic, 0, len(universe.Basics)+1)
 	rankUniverse = append(rankUniverse, reference)
 	rankUniverse = append(rankUniverse, universe.Basics...)
@@ -1568,6 +3024,43 @@ func betterMetricSpecsForDimension(dimension string) []betterMetricSpec {
 			{Key: "growth12", Label: "近1年", Better: "higher", Weight: 1.15, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
 			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.55, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
 			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+		}
+	default:
+		return specs
+	}
+}
+
+func betterMetricSpecsForDimensionV2(dimension string) []betterMetricSpec {
+	specs := []betterMetricSpec{
+		{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 0.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+		{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 1.00, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+		{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 1.10, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+		{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 0.65, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
+		{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+		{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.15, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+		{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.85, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+		{Key: "calmar12", Label: "Calmar", Better: "higher", Weight: 0.75, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Calmar12 }},
+	}
+
+	switch normalizeBetterFundDimension(dimension) {
+	case "lower_drawdown":
+		return []betterMetricSpec{
+			{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
+			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 1.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+			{Key: "volatility12", Label: "近1年波动", Better: "lower", Weight: 0.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.Volatility12 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.45, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 0.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+		}
+	case "higher_return":
+		return []betterMetricSpec{
+			{Key: "growth1", Label: "近1月收益", Better: "higher", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth1 }},
+			{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 1.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+			{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 1.20, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.30, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.30, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.45, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
 		}
 	default:
 		return specs
@@ -1795,6 +3288,23 @@ func betterSortLabel(dimension string) string {
 }
 
 func betterDataHint(refreshStatus FundRefreshStatus, universe betterCandidateUniverse) string {
+	if universe.NetworkRefresh {
+		hint := "当前推荐已按同类基金池联网补抓后重排"
+		if universe.RefreshedCount > 0 {
+			hint += "，本次新增刷新 " + strconv.Itoa(universe.RefreshedCount) + " 只"
+		}
+		if universe.Limited {
+			hint += "。当前范围过大，已对联网样本做限流补抓"
+		}
+		if universe.ComparedUniverse > 0 {
+			hint += " 当前比较范围：" + universe.ScopeLabel + "，有效样本 " + strconv.Itoa(universe.ComparedUniverse) + " 只"
+			if universe.UniverseTotal > 0 {
+				hint += " / 目标池 " + strconv.Itoa(universe.UniverseTotal) + " 只"
+			}
+			hint += "。"
+		}
+		return hint
+	}
 	hint := refreshStatus.Message
 	if strings.TrimSpace(hint) == "" {
 		hint = "推荐基于本地基金指标缓存"
@@ -1816,7 +3326,7 @@ func isReturnBetterMetric(key string) bool {
 
 func isRiskBetterMetric(key string) bool {
 	switch key {
-	case "drawdown12", "volatility12", "sharpe12", "calmar12":
+	case "drawdown3", "drawdown6", "drawdown12", "volatility12", "sharpe12", "calmar12":
 		return true
 	default:
 		return false
@@ -1878,10 +3388,30 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 	}
 
 	api := data.NewFundApi()
-	api.CrawlFundBasic(code)
-
 	updates := map[string]any{
 		"screen_updated_at": time.Now().Format("2006-01-02 15:04:05"),
+	}
+	if basic, err := api.CrawlFundBasic(code); err == nil && basic != nil {
+		if strings.TrimSpace(basic.TrackingTarget) != "" {
+			updates["tracking_target"] = strings.TrimSpace(basic.TrackingTarget)
+		}
+		if basic.NetGrowth1 != nil {
+			updates["net_growth1"] = basic.NetGrowth1
+		}
+		if basic.NetGrowth3 != nil {
+			updates["net_growth3"] = basic.NetGrowth3
+		}
+		if basic.NetGrowth6 != nil {
+			updates["net_growth6"] = basic.NetGrowth6
+		}
+		if basic.NetGrowth12 != nil {
+			updates["net_growth12"] = basic.NetGrowth12
+		}
+		if basic.RedeemFeeFreeDays > 0 {
+			updates["redeem_fee_free_days"] = basic.RedeemFeeFreeDays
+		}
+	} else if err != nil {
+		logger.SugaredLogger.Warnf("crawl fund basic failed for %s: %v", code, err)
 	}
 
 	if rankings, err := api.GetFundStageRankings(code); err == nil {
@@ -1891,18 +3421,34 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 				updates["net_growth7"] = item.ReturnRate
 			case "1m":
 				updates["net_growth1"] = item.ReturnRate
+				updates["stage_rank1_m"] = item.Rank
+				updates["stage_rank1_m_total"] = item.RankTotal
 			case "3m":
 				updates["net_growth3"] = item.ReturnRate
+				updates["stage_rank3_m"] = item.Rank
+				updates["stage_rank3_m_total"] = item.RankTotal
 			case "6m":
 				updates["net_growth6"] = item.ReturnRate
+				updates["stage_rank6_m"] = item.Rank
+				updates["stage_rank6_m_total"] = item.RankTotal
 			case "12m":
 				updates["net_growth12"] = item.ReturnRate
+				updates["stage_rank12_m"] = item.Rank
+				updates["stage_rank12_m_total"] = item.RankTotal
 			}
 		}
+	} else {
+		logger.SugaredLogger.Warnf("get fund stage rankings failed for %s: %v", code, err)
 	}
 
 	if trend, _, _, err := api.GetFundTrend(code); err == nil {
-		riskSnapshot := calcFundRiskSnapshot(trend, time.Now().AddDate(-1, 0, 0))
+		riskSnapshot := calcFundRiskSnapshot(trend, time.Now())
+		if riskSnapshot.MaxDrawdown3 != nil {
+			updates["max_drawdown3"] = riskSnapshot.MaxDrawdown3
+		}
+		if riskSnapshot.MaxDrawdown6 != nil {
+			updates["max_drawdown6"] = riskSnapshot.MaxDrawdown6
+		}
 		if riskSnapshot.MaxDrawdown12 != nil {
 			updates["max_drawdown12"] = riskSnapshot.MaxDrawdown12
 		}
@@ -1915,6 +3461,8 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 		if riskSnapshot.Calmar12 != nil {
 			updates["calmar12"] = riskSnapshot.Calmar12
 		}
+	} else {
+		logger.SugaredLogger.Warnf("get fund trend failed for %s: %v", code, err)
 	}
 
 	if industry, err := api.GetFundTopIndustry(code); err == nil && industry != nil {
@@ -1941,6 +3489,19 @@ func (s *Service) refreshFollowedFundMarketData(code string, fallbackName string
 
 func normalizeFundStagePeriod(raw string) string {
 	period := strings.TrimSpace(strings.ReplaceAll(raw, " ", ""))
+	period = strings.ReplaceAll(period, "\u00a0", "")
+	switch {
+	case strings.Contains(period, "近1周"), strings.Contains(period, "近7天"), strings.Contains(period, "7天"), strings.Contains(period, "7日"), strings.Contains(period, "1周"), strings.Contains(period, "1星期"):
+		return "7d"
+	case strings.Contains(period, "近1月"), strings.Contains(period, "1月"), strings.Contains(period, "1个月"):
+		return "1m"
+	case strings.Contains(period, "近3月"), strings.Contains(period, "3月"), strings.Contains(period, "3个月"):
+		return "3m"
+	case strings.Contains(period, "近6月"), strings.Contains(period, "6月"), strings.Contains(period, "6个月"):
+		return "6m"
+	case strings.Contains(period, "近1年"), strings.Contains(period, "1年"):
+		return "12m"
+	}
 	switch {
 	case strings.Contains(period, "近1周"), strings.Contains(period, "近7天"), strings.Contains(period, "7天"), strings.Contains(period, "1周"):
 		return "7d"
@@ -2352,9 +3913,11 @@ func buildFundScreenerItem(basic data.FundBasic, watchlist bool) FundScreenerIte
 		Code:              basic.Code,
 		Name:              defaultLabel(basic.Name, basic.FullName),
 		FundType:          basic.Type,
+		TrackingTarget:    strings.TrimSpace(basic.TrackingTarget),
 		Category:          classification.Category,
 		CategoryLabel:     classification.Label,
 		RiskLevel:         classification.RiskLevel,
+		RedeemFeeFreeDays: basic.RedeemFeeFreeDays,
 		Company:           basic.Company,
 		Manager:           basic.Manager,
 		Rating:            basic.Rating,
@@ -2367,13 +3930,147 @@ func buildFundScreenerItem(basic data.FundBasic, watchlist bool) FundScreenerIte
 		NetGrowth3:        basic.NetGrowth3,
 		NetGrowth6:        basic.NetGrowth6,
 		NetGrowth12:       basic.NetGrowth12,
+		MaxDrawdown3:      basic.MaxDrawdown3,
+		MaxDrawdown6:      basic.MaxDrawdown6,
 		MaxDrawdown12:     basic.MaxDrawdown12,
 		Volatility12:      basic.Volatility12,
 		Sharpe12:          basic.Sharpe12,
 		Calmar12:          basic.Calmar12,
+		StageRank1M:       basic.StageRank1M,
+		StageRank1MTotal:  basic.StageRank1MTotal,
+		StageRank3M:       basic.StageRank3M,
+		StageRank3MTotal:  basic.StageRank3MTotal,
+		StageRank6M:       basic.StageRank6M,
+		StageRank6MTotal:  basic.StageRank6MTotal,
+		StageRank12M:      basic.StageRank12M,
+		StageRank12MTotal: basic.StageRank12MTotal,
 		ScreenUpdatedAt:   basic.ScreenUpdatedAt,
 		Watchlist:         watchlist,
 	}
+}
+
+func applyBetterFundPreferenceFilters(candidates []BetterFundCandidate, query BetterFundQuery) []BetterFundCandidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+
+	hydrateBetterCandidatePreferences(candidates)
+	filtered := make([]BetterFundCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !passesBetterFundPreferenceFilters(candidate, query) {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+
+	comparedUniverse := len(filtered) + 1
+	for index := range filtered {
+		filtered[index].RecommendationRank = index + 1
+		filtered[index].ComparedUniverse = comparedUniverse
+	}
+	return filtered
+}
+
+func hydrateBetterCandidatePreferences(candidates []BetterFundCandidate) {
+	codes := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		code := strings.TrimSpace(candidate.Code)
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	if len(codes) == 0 {
+		return
+	}
+
+	var basics []data.FundBasic
+	if err := db.Dao.Select(
+		"code, redeem_fee_free_days, max_drawdown3, max_drawdown6, max_drawdown12, "+
+			"stage_rank1_m, stage_rank1_m_total, stage_rank3_m, stage_rank3_m_total, "+
+			"stage_rank6_m, stage_rank6_m_total, stage_rank12_m, stage_rank12_m_total",
+	).Where("code IN ?", codes).Find(&basics).Error; err != nil {
+		return
+	}
+
+	basicMap := make(map[string]data.FundBasic, len(basics))
+	for _, basic := range basics {
+		basicMap[basic.Code] = basic
+	}
+	for index := range candidates {
+		basic, ok := basicMap[candidates[index].Code]
+		if !ok {
+			continue
+		}
+		if candidates[index].RedeemFeeFreeDays <= 0 {
+			candidates[index].RedeemFeeFreeDays = basic.RedeemFeeFreeDays
+		}
+		if candidates[index].MaxDrawdown3 == nil {
+			candidates[index].MaxDrawdown3 = cloneFloat(basic.MaxDrawdown3)
+		}
+		if candidates[index].MaxDrawdown6 == nil {
+			candidates[index].MaxDrawdown6 = cloneFloat(basic.MaxDrawdown6)
+		}
+		if candidates[index].MaxDrawdown12 == nil {
+			candidates[index].MaxDrawdown12 = cloneFloat(basic.MaxDrawdown12)
+		}
+		if candidates[index].StageRank1M <= 0 {
+			candidates[index].StageRank1M = basic.StageRank1M
+			candidates[index].StageRank1MTotal = basic.StageRank1MTotal
+		}
+		if candidates[index].StageRank3M <= 0 {
+			candidates[index].StageRank3M = basic.StageRank3M
+			candidates[index].StageRank3MTotal = basic.StageRank3MTotal
+		}
+		if candidates[index].StageRank6M <= 0 {
+			candidates[index].StageRank6M = basic.StageRank6M
+			candidates[index].StageRank6MTotal = basic.StageRank6MTotal
+		}
+		if candidates[index].StageRank12M <= 0 {
+			candidates[index].StageRank12M = basic.StageRank12M
+			candidates[index].StageRank12MTotal = basic.StageRank12MTotal
+		}
+	}
+}
+
+func passesBetterFundPreferenceFilters(candidate BetterFundCandidate, query BetterFundQuery) bool {
+	isAClass := isAFundShareClass(candidate.Name)
+	if query.OnlyAClass {
+		if !isAClass {
+			return false
+		}
+	} else if !query.IncludeAClass && isAClass {
+		return false
+	}
+	if !query.FeeFree7 && !query.FeeFree30 {
+		return true
+	}
+
+	days := candidate.RedeemFeeFreeDays
+	if days <= 0 {
+		return false
+	}
+	if query.FeeFree7 && days <= 7 {
+		return true
+	}
+	if query.FeeFree30 && days > 7 && days <= 30 {
+		return true
+	}
+	return false
+}
+
+func isAFundShareClass(name string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	match := regexp.MustCompile(`([A-Z])$`).FindStringSubmatch(normalized)
+	return len(match) == 2 && match[1] == "A"
 }
 
 func loadFundTypeOptions() []string {
@@ -2463,9 +4160,11 @@ func calcFundMaxDrawdown(points []data.FundTrendPoint, since time.Time) *float64
 	return &value
 }
 
-func calcFundRiskSnapshot(points []data.FundTrendPoint, since time.Time) fundRiskSnapshot {
+func calcFundRiskSnapshot(points []data.FundTrendPoint, now time.Time) fundRiskSnapshot {
 	snapshot := fundRiskSnapshot{
-		MaxDrawdown12: calcFundMaxDrawdown(points, since),
+		MaxDrawdown3:  calcFundMaxDrawdown(points, now.AddDate(0, -3, 0)),
+		MaxDrawdown6:  calcFundMaxDrawdown(points, now.AddDate(0, -6, 0)),
+		MaxDrawdown12: calcFundMaxDrawdown(points, now.AddDate(-1, 0, 0)),
 	}
 	if len(points) < 2 {
 		return snapshot
@@ -2476,7 +4175,7 @@ func calcFundRiskSnapshot(points []data.FundTrendPoint, since time.Time) fundRis
 		if point.Timestamp <= 0 {
 			continue
 		}
-		if time.UnixMilli(point.Timestamp).Before(since) {
+		if time.UnixMilli(point.Timestamp).Before(now.AddDate(-1, 0, 0)) {
 			continue
 		}
 		filtered = append(filtered, point)

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -27,6 +28,18 @@ type FundApi struct {
 	client *resty.Client
 	config *SettingConfig
 }
+
+type FundCatalogItem struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+var fundCatalogCache = struct {
+	mu       sync.RWMutex
+	items    []FundCatalogItem
+	loadedAt time.Time
+}{}
 
 func NewFundApi() *FundApi {
 	return &FundApi{
@@ -96,10 +109,21 @@ type FundBasic struct {
 	NetGrowthYTD      *float64 `json:"netGrowthYTD"`
 	NetGrowthAll      *float64 `json:"netGrowthAll"`
 	NetGrowth7        *float64 `json:"netGrowth7"`
+	MaxDrawdown3      *float64 `json:"maxDrawdown3"`
+	MaxDrawdown6      *float64 `json:"maxDrawdown6"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`
 	Volatility12      *float64 `json:"volatility12"`
 	Sharpe12          *float64 `json:"sharpe12"`
 	Calmar12          *float64 `json:"calmar12"`
+	StageRank1M       int      `json:"stageRank1m"`
+	StageRank1MTotal  int      `json:"stageRank1mTotal"`
+	StageRank3M       int      `json:"stageRank3m"`
+	StageRank3MTotal  int      `json:"stageRank3mTotal"`
+	StageRank6M       int      `json:"stageRank6m"`
+	StageRank6MTotal  int      `json:"stageRank6mTotal"`
+	StageRank12M      int      `json:"stageRank12m"`
+	StageRank12MTotal int      `json:"stageRank12mTotal"`
+	RedeemFeeFreeDays int      `json:"redeemFeeFreeDays"`
 	TopIndustry       string   `json:"topIndustry"`
 	TopIndustryWeight *float64 `json:"topIndustryWeight"`
 	TopIndustryDate   string   `json:"topIndustryDate"`
@@ -179,6 +203,7 @@ func (f *FundApi) CrawlFundBasic(fundCode string) (*FundBasic, error) {
 	})
 
 	parseGrowthMetrics(doc, fund)
+	f.applyFundFeeInfo(fundCode, fund)
 
 	count := int64(0)
 	db.Dao.Model(fund).Where("code=?", fund.Code).Count(&count)
@@ -290,6 +315,7 @@ func (f *FundApi) crawlFundBasicHTTP(fundCode string) (*FundBasic, error) {
 	} else {
 		logger.SugaredLogger.Warnf("fetchFundPingzhongData failed for %s: %v", fundCode, pingzhongErr)
 	}
+	f.applyFundFeeInfo(fundCode, fund)
 
 	if strings.TrimSpace(fund.Name) == "" {
 		return nil, fmt.Errorf("fund page parse failed")
@@ -337,6 +363,41 @@ func (f *FundApi) fetchFundPingzhongData(code string) (string, error) {
 	return string(response.Body()), nil
 }
 
+func (f *FundApi) fetchFundFeePageHTML(code string) (string, error) {
+	client := f.client
+	if client == nil {
+		client = resty.New()
+	}
+	response, err := client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", fmt.Sprintf("https://fund.eastmoney.com/%s.html", code)).
+		Get(fmt.Sprintf("https://fundf10.eastmoney.com/jjfl_%s.html", code))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode() != 200 {
+		return "", fmt.Errorf("unexpected status code: %d", response.StatusCode())
+	}
+	return decodeHTTPDocument(response.Body(), response.Header().Get("Content-Type"))
+}
+
+func (f *FundApi) applyFundFeeInfo(code string, fund *FundBasic) {
+	if fund == nil {
+		return
+	}
+	feeHTML, err := f.fetchFundFeePageHTML(code)
+	if err != nil {
+		logger.SugaredLogger.Warnf("fetchFundFeePageHTML failed for %s: %v", code, err)
+		return
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(feeHTML))
+	if err != nil {
+		logger.SugaredLogger.Warnf("parse fund fee document failed for %s: %v", code, err)
+		return
+	}
+	parseFundFeeHTTPDocument(doc, fund)
+}
+
 func decodeHTTPDocument(body []byte, contentType string) (string, error) {
 	reader, err := charset.NewReader(bytes.NewReader(body), contentType)
 	if err != nil {
@@ -363,6 +424,30 @@ func parseFundBasicHTTPDocument(doc *goquery.Document, fund *FundBasic) {
 			return
 		}
 		value := extractFundHTTPInfoValue(text)
+		if containsFundHTTPText(text, "基金全称") {
+			fund.FullName = value
+		}
+		if containsFundHTTPText(text, "基金类型", "类型：", "类型:") {
+			fund.Type = value
+		}
+		if containsFundHTTPText(text, "成立日", "成立日期") {
+			fund.Establishment = value
+		}
+		if containsFundHTTPText(text, "基金规模", "规模：", "规模:") {
+			fund.Scale = value
+		}
+		if containsFundHTTPText(text, "管理人", "基金公司") {
+			fund.Company = value
+		}
+		if containsFundHTTPText(text, "基金经理", "经理：", "经理:") {
+			fund.Manager = value
+		}
+		if containsFundHTTPText(text, "基金评级", "评级") {
+			fund.Rating = value
+		}
+		if containsFundHTTPText(text, "跟踪标的") {
+			fund.TrackingTarget = value
+		}
 		switch {
 		case strings.Contains(text, "基金全称"):
 			fund.FullName = value
@@ -405,6 +490,117 @@ func normalizeFundHTTPInfoText(text string) string {
 	return text
 }
 
+func containsFundHTTPText(text string, keywords ...string) bool {
+	for _, keyword := range keywords {
+		if keyword != "" && strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeFundZeroRedeemFee(text string) bool {
+	value := parsePercentPointer(text)
+	return value != nil && *value == 0
+}
+
+func extractFundFeeFreeDays(text string) (int, bool) {
+	if text == "" {
+		return 0, false
+	}
+	normalized := normalizeFundHTTPInfoText(text)
+	if containsFundHTTPText(normalized, "天", "日", "周", "月", "年") {
+		matches := regexp.MustCompile(`\d+`).FindAllString(normalized, -1)
+		minDays := 0
+		for _, match := range matches {
+			days, err := strconv.Atoi(match)
+			if err != nil || days <= 0 {
+				continue
+			}
+			if minDays == 0 || days < minDays {
+				minDays = days
+			}
+		}
+		if minDays > 0 {
+			return minDays, true
+		}
+	}
+	if !strings.Contains(normalized, "天") && !strings.Contains(normalized, "日") && !strings.Contains(normalized, "澶") {
+		return 0, false
+	}
+	match := regexp.MustCompile(`\d+`).FindString(normalized)
+	if match == "" {
+		return 0, false
+	}
+	days, err := strconv.Atoi(match)
+	if err != nil || days <= 0 {
+		return 0, false
+	}
+	return days, true
+}
+
+func parseFundFeeHTTPDocument(doc *goquery.Document, fund *FundBasic) {
+	if doc == nil || fund == nil {
+		return
+	}
+
+	minDays := 0
+	doc.Find("table tr").Each(func(_ int, row *goquery.Selection) {
+		cells := row.Find("th,td")
+		if cells.Length() < 2 {
+			return
+		}
+		condition := normalizeFundHTTPInfoText(cells.First().Text())
+		feeText := normalizeFundHTTPInfoText(cells.Last().Text())
+		if containsFundHTTPText(condition, "适用期限", "赎回费率", "适用金额", "费率") {
+			return
+		}
+		if !looksLikeFundZeroRedeemFee(feeText) {
+			return
+		}
+		days, ok := extractFundFeeFreeDays(condition)
+		if !ok {
+			return
+		}
+		if minDays == 0 || days < minDays {
+			minDays = days
+		}
+	})
+	if minDays > 0 {
+		fund.RedeemFeeFreeDays = minDays
+		return
+	}
+
+	table := doc.Find(`a[name="shfl"]`).First().ParentsFiltered(".boxitem").First().Find("table").First()
+	if table.Length() == 0 {
+		return
+	}
+
+	minDays = 0
+	table.Find("tbody tr").Each(func(_ int, row *goquery.Selection) {
+		cells := row.Find("td")
+		if cells.Length() < 2 {
+			return
+		}
+		condition := normalizeFundHTTPInfoText(cells.First().Text())
+		feeText := normalizeFundHTTPInfoText(cells.Eq(1).Text())
+		if !looksLikeFundZeroRedeemFee(feeText) {
+			return
+		}
+		days, ok := extractFundFeeFreeDays(condition)
+		if !ok {
+			return
+		}
+		if minDays == 0 || days < minDays {
+			minDays = days
+		}
+	})
+
+	if minDays > 0 {
+		fund.RedeemFeeFreeDays = minDays
+	}
+}
+
 func extractFundHTTPInfoValue(text string) string {
 	for _, sep := range []string{"：", ":"} {
 		if strings.Contains(text, sep) {
@@ -412,6 +608,12 @@ func extractFundHTTPInfoValue(text string) string {
 			if len(parts) == 2 {
 				return strings.TrimSpace(parts[1])
 			}
+		}
+	}
+	if strings.Contains(text, "：") {
+		parts := strings.SplitN(text, "：", 2)
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1])
 		}
 	}
 	return strings.TrimSpace(text)
@@ -448,6 +650,61 @@ func (f *FundApi) GetFundList(key string) []FundBasic {
 	var funds []FundBasic
 	db.Dao.Where("code like ? or name like ?", "%"+key+"%", "%"+key+"%").Limit(10).Find(&funds)
 	return funds
+}
+
+func (f *FundApi) GetEastmoneyFundCatalog(forceRefresh bool) ([]FundCatalogItem, error) {
+	fundCatalogCache.mu.RLock()
+	if !forceRefresh && len(fundCatalogCache.items) > 0 && time.Since(fundCatalogCache.loadedAt) < 12*time.Hour {
+		items := append([]FundCatalogItem(nil), fundCatalogCache.items...)
+		fundCatalogCache.mu.RUnlock()
+		return items, nil
+	}
+	fundCatalogCache.mu.RUnlock()
+
+	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", "https://fund.eastmoney.com/").
+		Get("https://fund.eastmoney.com/js/fundcode_search.js")
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode() != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", response.StatusCode())
+	}
+
+	match := regexp.MustCompile(`var\s+r\s*=\s*(\[[\s\S]*\])\s*;?\s*$`).FindStringSubmatch(string(response.Body()))
+	if len(match) < 2 {
+		return nil, fmt.Errorf("fund catalog payload not found")
+	}
+
+	var raw [][]string
+	if err := json.Unmarshal([]byte(match[1]), &raw); err != nil {
+		return nil, err
+	}
+
+	items := make([]FundCatalogItem, 0, len(raw))
+	for _, row := range raw {
+		if len(row) < 4 {
+			continue
+		}
+		code := strings.TrimSpace(row[0])
+		name := strings.TrimSpace(row[2])
+		fundType := strings.TrimSpace(row[3])
+		if code == "" || name == "" || fundType == "" {
+			continue
+		}
+		items = append(items, FundCatalogItem{
+			Code: code,
+			Name: name,
+			Type: fundType,
+		})
+	}
+
+	fundCatalogCache.mu.Lock()
+	fundCatalogCache.items = append([]FundCatalogItem(nil), items...)
+	fundCatalogCache.loadedAt = time.Now()
+	fundCatalogCache.mu.Unlock()
+	return items, nil
 }
 
 func (f *FundApi) GetFollowedFund() []FollowedFund {

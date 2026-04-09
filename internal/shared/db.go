@@ -64,6 +64,8 @@ func InitDB(dbPath string) {
 	db.Dao.AutoMigrate(&portfolio.Holding{})
 	db.Dao.AutoMigrate(&portfolio.Transaction{})
 	db.Dao.AutoMigrate(&portfolio.ProfitSnapshot{})
+	db.Dao.AutoMigrate(&portfolio.FundRecommendationCache{})
+	db.Dao.AutoMigrate(&portfolio.FundRecommendationProgress{})
 	db.Dao.AutoMigrate(&quant.Template{})
 	db.Dao.AutoMigrate(&quant.TemplateCategory{})
 

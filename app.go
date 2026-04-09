@@ -721,7 +721,11 @@ func (a *App) EnsureFundUniverse() int64 {
 }
 
 func (a *App) GetBetterFunds(query portfolio.BetterFundQuery) *portfolio.BetterFundResult {
-	return a.PortfolioService.GetBetterFunds(query)
+	return a.PortfolioService.GetBetterFundsCached(query)
+}
+
+func (a *App) GetFundRecommendationRefreshStatus(autoStart bool) portfolio.FundRecommendationRefreshStatus {
+	return a.PortfolioService.GetFundRecommendationRefreshStatus(autoStart)
 }
 
 func (a *App) CompareFunds(query portfolio.FundCompareQuery) *portfolio.FundCompareResult {
@@ -739,8 +743,12 @@ func (a *App) AnalyzeFundWithAI(code string, aiConfigId int) map[string]any {
 		return map[string]any{"success": false, "message": "未找到基金资料"}
 	}
 
-	peers := a.PortfolioService.GetBetterFunds(portfolio.BetterFundQuery{
+	peers := a.PortfolioService.GetBetterFundsCached(portfolio.BetterFundQuery{
 		ReferenceCode: code,
+		SameTypeOnly:  true,
+		FeeFree7:      true,
+		FeeFree30:     true,
+		IncludeAClass: false,
 		Page:          1,
 		PageSize:      5,
 	})
@@ -819,7 +827,7 @@ func (a *App) AnalyzeBetterFundsWithAI(query portfolio.BetterFundQuery, topN int
 		query.PageSize = max(topN, 8)
 	}
 
-	result := a.PortfolioService.GetBetterFunds(query)
+	result := a.PortfolioService.GetBetterFundsCached(query)
 	if result == nil || len(result.Candidates) == 0 {
 		return map[string]any{"success": false, "message": "当前栏目暂无可供 AI 分析的推荐基金"}
 	}
@@ -837,6 +845,11 @@ func (a *App) AnalyzeBetterFundsWithAI(query portfolio.BetterFundQuery, topN int
 		"scopeLabel":       result.ScopeLabel,
 		"comparedUniverse": result.ComparedUniverse,
 		"sameTypeOnly":     query.SameTypeOnly,
+		"sameSubTypeOnly":  query.SameSubTypeOnly,
+		"feeFree7":         query.FeeFree7,
+		"feeFree30":        query.FeeFree30,
+		"includeAClass":    query.IncludeAClass,
+		"onlyAClass":       query.OnlyAClass,
 		"dataHint":         result.DataHint,
 		"referenceFund":    result.Reference,
 		"topCandidates":    candidates,

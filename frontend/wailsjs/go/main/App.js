@@ -318,6 +318,10 @@ export function GetFundProfile(arg1) {
   return window['go']['main']['App']['GetFundProfile'](arg1);
 }
 
+export function GetFundRecommendationRefreshStatus(arg1) {
+  return window['go']['main']['App']['GetFundRecommendationRefreshStatus'](arg1);
+}
+
 export function GetFundScreener(arg1) {
   return window['go']['main']['App']['GetFundScreener'](arg1);
 }

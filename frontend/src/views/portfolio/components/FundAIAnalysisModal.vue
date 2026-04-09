@@ -40,6 +40,11 @@ const props = defineProps({
   betterReferenceCode: { type: String, default: '' },
   betterDimension: { type: String, default: 'balanced' },
   sameTypeOnly: { type: Boolean, default: false },
+  sameSubTypeOnly: { type: Boolean, default: false },
+  feeFree7: { type: Boolean, default: true },
+  feeFree30: { type: Boolean, default: true },
+  includeAClass: { type: Boolean, default: false },
+  onlyAClass: { type: Boolean, default: false },
   betterTopN: { type: Number, default: 3 }
 })
 
@@ -89,7 +94,7 @@ watch(
 )
 
 watch(
-  () => `${props.mode}|${props.fundCode}|${props.scope}|${props.betterReferenceCode}|${props.betterDimension}|${props.sameTypeOnly}|${props.betterTopN}`,
+  () => `${props.mode}|${props.fundCode}|${props.scope}|${props.betterReferenceCode}|${props.betterDimension}|${props.sameTypeOnly}|${props.sameSubTypeOnly}|${props.feeFree7}|${props.feeFree30}|${props.includeAClass}|${props.onlyAClass}|${props.betterTopN}`,
   () => {
     if (props.show) {
       resetState()
@@ -175,7 +180,12 @@ function invokeAnalysis() {
       {
         referenceCode: props.betterReferenceCode || '',
         sameTypeOnly: props.sameTypeOnly,
+        sameSubTypeOnly: props.sameSubTypeOnly,
         dimension: props.betterDimension || 'balanced',
+        feeFree7: props.feeFree7,
+        feeFree30: props.feeFree30,
+        includeAClass: props.includeAClass,
+        onlyAClass: props.onlyAClass,
         page: 1,
         pageSize: Math.max(Number(props.betterTopN || 3), 8)
       },

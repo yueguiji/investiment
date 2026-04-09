@@ -44,6 +44,17 @@
       </div>
     </div>
 
+    <div class="platform-card recommendation-status-card" v-if="recommendationStatus">
+      <div class="recommendation-status-head">
+        <div class="recommendation-status-title">推荐检索状态</div>
+        <div class="recommendation-status-badge" :class="{ running: recommendationStatus.refreshing, done: recommendationStatus.state === 'completed' }">
+          {{ recommendationStatus.stateLabel || '未开始' }}
+        </div>
+      </div>
+      <div class="recommendation-status-summary">{{ recommendationSummary }}</div>
+      <div class="recommendation-status-hint">{{ recommendationHint }}</div>
+    </div>
+
     <div class="platform-card table-shell">
       <div class="table-toolbar">
         <n-space>
@@ -91,6 +102,11 @@
       :better-reference-code="betterReferenceCode"
       :better-dimension="betterDimension"
       :same-type-only="sameTypeOnly"
+      :same-sub-type-only="betterSameSubTypeOnly"
+      :fee-free7="betterFeeFree7"
+      :fee-free30="betterFeeFree30"
+      :include-a-class="betterIncludeAClass"
+      :only-a-class="betterIncludeAClass"
       :better-top-n="3"
       :title="betterAITitle"
     />
@@ -140,13 +156,24 @@
       <div class="better-toolbar">
         <div class="better-toolbar-left">
           <n-checkbox v-model:checked="sameTypeOnly">只看同类型</n-checkbox>
+          <div class="better-filter-group">
+            <n-checkbox
+              v-model:checked="betterSameSubTypeOnly"
+              :disabled="betterSubTypeDisabled"
+            >
+              {{ betterSubTypeLabelText }}
+            </n-checkbox>
+            <n-checkbox v-model:checked="betterFeeFree7">免7</n-checkbox>
+            <n-checkbox v-model:checked="betterFeeFree30">免30</n-checkbox>
+            <n-checkbox v-model:checked="betterIncludeAClass">只看A类</n-checkbox>
+          </div>
           <n-text depth="3">当前栏目支持直接对 Top3 推荐基金做 AI 对比分析。</n-text>
         </div>
         <div class="better-toolbar-right">
           <n-button :disabled="!betterRows.length || betterLoading" @click="openBetterAI">
             AI分析{{ currentBetterDimensionLabel }}Top3
           </n-button>
-          <n-button :loading="betterLoading" @click="loadBetterFunds">重新筛选</n-button>
+          <n-button :loading="betterLoading" @click="loadBetterFunds(true)">刷新结果</n-button>
         </div>
       </div>
       <div v-if="betterResult" class="better-context" :class="{ warning: betterResult.fallbackApplied }">
@@ -154,13 +181,13 @@
           <div class="better-context-title">{{ betterResult.sortLabel || '按推荐得分排序' }}</div>
           <div class="better-context-meta">
             <span>{{ betterResult.scopeLabel || '基金池对比' }}</span>
-            <span>样本 {{ betterResult.comparedUniverse || 0 }} 只</span>
+            <span>推荐 {{ betterResult.total || 0 }} / 样本 {{ betterResult.comparedUniverse || 0 }} / 目标池 {{ betterResult.universeTotal || betterResult.comparedUniverse || 0 }} 只</span>
             <span>更新时间 {{ betterResult.refreshStatus?.lastRefreshHint || '本地缓存' }}</span>
           </div>
         </div>
-        <div class="better-context-hint">{{ betterResult.dataHint || '推荐基于本地基金指标缓存。' }}</div>
+        <div class="better-context-hint">{{ betterResult.dataHint || '推荐结果来自后台已生成的推荐缓存。' }} 同类排名来自东方财富官网阶段排名，回撤基于基金净值趋势测算。</div>
       </div>
-      <n-tabs v-model:value="betterDimension" type="segment" animated @update:value="loadBetterFunds">
+      <n-tabs v-model:value="betterDimension" type="segment" animated @update:value="loadBetterFunds()">
         <n-tab name="lower_drawdown" tab="回撤更低" />
         <n-tab name="higher_return" tab="收益更高" />
         <n-tab name="balanced" tab="实力均衡更优" />
@@ -179,7 +206,7 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NTag, NText, useDialog, useMessage } from 'naive-ui'
 import { FollowFund, GetBetterFunds, GetFollowedFund, GetfundList, OpenURL, UnFollowFund } from '../../../wailsjs/go/main/App'
 import FundInsightDrawer from '../portfolio/components/FundInsightDrawer.vue'
@@ -200,8 +227,13 @@ const showBetterAI = ref(false)
 const showBetterModal = ref(false)
 const betterLoading = ref(false)
 const sameTypeOnly = ref(false)
+const betterSameSubTypeOnly = ref(false)
+const betterFeeFree7 = ref(true)
+const betterFeeFree30 = ref(true)
+const betterIncludeAClass = ref(false)
 const betterDimension = ref('balanced')
 const betterResult = ref(null)
+const recommendationStatus = ref(null)
 const checkedRowKeys = ref([])
 const showCompareModal = ref(false)
 const activeGroupTab = ref('__all__')
@@ -293,6 +325,18 @@ const betterTitle = computed(() => {
   const name = activeFund.value?.name || activeFund.value?.stockName || activeFund.value?.code || activeFund.value?.stockCode || '当前基金'
   return name + ' 的对比推荐'
 })
+const betterSubTypeLabel = computed(() => String(
+  betterResult.value?.reference?.trackingTarget ||
+  activeFund.value?.trackingTarget ||
+  ''
+).trim())
+const betterSubTypeDisabled = computed(() => !sameTypeOnly.value || !betterSubTypeLabel.value)
+const betterSubTypeLabelText = computed(() => {
+  if (!betterSubTypeLabel.value) {
+    return '同子类型'
+  }
+  return `同子类型（${betterSubTypeLabel.value}）`
+})
 const currentBetterDimensionLabel = computed(() => {
   switch (betterDimension.value) {
     case 'lower_drawdown':
@@ -305,6 +349,39 @@ const currentBetterDimensionLabel = computed(() => {
 })
 const betterAITitle = computed(() => `${betterTitle.value} · ${currentBetterDimensionLabel.value} Top3 AI分析`)
 const betterRows = computed(() => betterResult.value?.candidates || [])
+const recommendationSummary = computed(() => {
+  const status = recommendationStatus.value
+  if (!status) return ''
+  const parts = [
+    `当前自选 ${status.watchlistCount || 0} 只`,
+    `推荐缓存已完成 ${status.completedCount || 0} 只`
+  ]
+  if (status.pendingCount > 0) {
+    parts.push(`剩余 ${status.pendingCount || 0} 只`)
+  }
+  if (status.refreshing && status.progressTotal > 0) {
+    parts.push(`后台进度 ${status.progressCurrent || 0}/${status.progressTotal || 0}`)
+  }
+  if (status.currentCode) {
+    parts.push(`当前 ${status.currentCode}`)
+  }
+  let summary = parts.join('，') + '。'
+  if (status.lastRefreshHint) {
+    summary += ` 最近完成时间：${status.lastRefreshHint}`
+  }
+  return summary
+})
+const recommendationHint = computed(() => {
+  const status = recommendationStatus.value
+  if (!status) {
+    return '后台会按今日自选基金逐只补齐推荐缓存。'
+  }
+  const base = status.message || '后台会按今日自选基金逐只补齐推荐缓存。'
+  if (status.state === 'completed') {
+    return base
+  }
+  return `${base} 推荐结果每天只生成一次，未完成时下次会从剩余基金继续补齐。`
+})
 const activeCustomGroup = computed(() => isCustomGroupTab(activeGroupTab.value) ? activeGroupTab.value : '')
 const activeCustomGroupRows = computed(() => rows.value.filter((row) => String(row.watchGroup || '').trim() === activeCustomGroup.value))
 const groupModalTitle = computed(() => {
@@ -509,34 +586,31 @@ const betterColumns = computed(() => [
     ])
   },
   {
-    title: '关键对比',
+    title: '主要指标对比',
     key: 'comparison',
-    width: 430,
-    render: (row) => renderBetterComparisonCell(row, betterMetricKeys())
+    width: 520,
+    render: (row) => renderBetterComparisonTable(row)
   },
   {
-    title: '同类位置',
+    title: '官网同类排名',
     key: 'peerRanks',
-    width: 280,
-    render: (row) => renderBetterRankCell(row, betterMetricKeys())
+    width: 320,
+    render: (row) => renderBetterOfficialRankTable(row)
   },
   {
-    title: '采纳理由',
+    title: '结论',
     key: 'reasons',
-    width: 380,
+    width: 260,
     render: (row) => renderBetterReasonCell(row)
   }
 ])
 
-function betterMetricKeys() {
-  switch (betterDimension.value) {
-    case 'lower_drawdown':
-      return ['drawdown12', 'volatility12', 'sharpe12', 'growth6']
-    case 'higher_return':
-      return ['growth3', 'growth6', 'growth12', 'sharpe12', 'drawdown12']
-    default:
-      return ['growth6', 'growth12', 'drawdown12', 'sharpe12', 'calmar12']
-  }
+function comparisonMetricKeys() {
+  return ['growth1', 'growth3', 'growth6', 'growth12', 'drawdown3', 'drawdown6', 'drawdown12', 'sharpe12', 'calmar12']
+}
+
+function officialRankKeys() {
+  return ['rank1m', 'rank3m', 'rank6m', 'rank12m']
 }
 
 function findBetterMetric(row, key) {
@@ -550,10 +624,16 @@ function betterMetricLabel(key) {
     case 'growth3': return '近3月'
     case 'growth6': return '近6月'
     case 'growth12': return '近1年'
+    case 'drawdown3': return '3月最大回撤'
+    case 'drawdown6': return '6月最大回撤'
     case 'drawdown12': return '近1年最大回撤'
     case 'volatility12': return '近1年波动'
     case 'sharpe12': return '近1年夏普'
     case 'calmar12': return 'Calmar'
+    case 'rank1m': return '近1月'
+    case 'rank3m': return '近3月'
+    case 'rank6m': return '近6月'
+    case 'rank12m': return '近1年'
     default: return key
   }
 }
@@ -563,7 +643,7 @@ function isRatioMetric(key) {
 }
 
 function isLowerBetterMetric(key) {
-  return key === 'drawdown12' || key === 'volatility12'
+  return key === 'drawdown3' || key === 'drawdown6' || key === 'drawdown12' || key === 'volatility12'
 }
 
 function formatMetricValue(value, key) {
@@ -600,56 +680,173 @@ function metricTone(metric, key) {
   return better ? 'profit-text' : 'loss-text'
 }
 
-function metricSupportText(metric, key) {
-  if (!metric) return '暂无数据'
-  const parts = []
-  if (metric.advantage != null && Number(metric.advantage) > 0) {
-    parts.push(`${isLowerBetterMetric(key) ? '改善' : '领先'} ${formatMetricValue(metric.advantage, key)}`)
+function getMetricPair(row, key) {
+  const reference = betterResult.value?.reference || null
+  if (!reference) return null
+
+  switch (key) {
+    case 'growth1':
+      return { candidate: row?.netGrowth1, reference: reference.netGrowth1 }
+    case 'growth3':
+      return { candidate: row?.netGrowth3, reference: reference.netGrowth3 }
+    case 'growth6':
+      return { candidate: row?.netGrowth6, reference: reference.netGrowth6 }
+    case 'growth12':
+      return { candidate: row?.netGrowth12, reference: reference.netGrowth12 }
+    case 'drawdown3':
+      return { candidate: row?.maxDrawdown3, reference: reference.maxDrawdown3 }
+    case 'drawdown6':
+      return { candidate: row?.maxDrawdown6, reference: reference.maxDrawdown6 }
+    case 'drawdown12':
+      return { candidate: row?.maxDrawdown12, reference: reference.maxDrawdown12 }
+    case 'sharpe12':
+      return { candidate: row?.sharpe12, reference: reference.sharpe12 }
+    case 'calmar12':
+      return { candidate: row?.calmar12, reference: reference.calmar12 }
+    default:
+      return null
   }
-  if (metric.candidateRank && metric.rankTotal) {
-    const rankText = metric.referenceRank
-      ? `候选 ${metric.candidateRank}/${metric.rankTotal} · 当前 ${metric.referenceRank}/${metric.rankTotal}`
-      : `候选 ${metric.candidateRank}/${metric.rankTotal}`
-    parts.push(rankText)
-  }
-  return parts.join(' · ') || '暂无明显优势'
 }
 
-function renderBetterComparisonCell(row, keys) {
-  return h('div', { class: 'better-metric-list' }, keys.map((key) => {
-    const metric = findBetterMetric(row, key)
-    return h('div', { class: 'better-metric-row', key }, [
-      h('div', { class: 'better-metric-head' }, [
-        h('span', { class: 'better-metric-label' }, metric?.label || betterMetricLabel(key)),
-        h('strong', { class: metricTone(metric, key) }, metric ? `${formatMetricValue(metric.candidateValue, key)} vs ${formatMetricValue(metric.referenceValue, key)}` : '-')
+function comparePair(candidateValue, referenceValue, lowerBetter = false) {
+  if (candidateValue === null || candidateValue === undefined || referenceValue === null || referenceValue === undefined) {
+    return { icon: '—', label: '待补', tone: 'muted' }
+  }
+  const candidate = Number(candidateValue)
+  const reference = Number(referenceValue)
+  if (Math.abs(candidate - reference) < 0.0001) {
+    return { icon: '→', label: '持平', tone: 'muted' }
+  }
+  const candidateBetter = lowerBetter ? candidate < reference : candidate > reference
+  return candidateBetter
+    ? { icon: '↑', label: '候选更优', tone: 'profit-text' }
+    : { icon: '↓', label: '当前更优', tone: 'loss-text' }
+}
+
+function renderBetterComparisonTable(row) {
+  const rows = comparisonMetricKeys().map((key) => {
+    const pair = getMetricPair(row, key)
+    const decision = comparePair(pair?.candidate, pair?.reference, isLowerBetterMetric(key))
+    return h('tr', { key }, [
+      h('td', { class: 'better-table-label' }, betterMetricLabel(key)),
+      h('td', { class: metricTone(findBetterMetric(row, key), key) }, pair ? formatMetricValue(pair.candidate, key) : '-'),
+      h('td', {}, pair ? formatMetricValue(pair.reference, key) : '-'),
+      h('td', {}, [
+        h('span', { class: ['better-direction', decision.tone] }, `${decision.icon} ${decision.label}`)
+      ])
+    ])
+  })
+
+  return h('div', { class: 'better-panel-card' }, [
+    h('div', { class: 'better-panel-title' }, '收益 / 回撤 / 风险质量'),
+    h('table', { class: 'better-mini-table' }, [
+      h('thead', {}, [
+        h('tr', {}, [
+          h('th', {}, '指标'),
+          h('th', {}, '候选'),
+          h('th', {}, '当前'),
+          h('th', {}, '判断')
+        ])
       ]),
-      h('div', { class: 'better-metric-sub muted' }, metricSupportText(metric, key))
+      h('tbody', {}, rows)
     ])
-  }))
+  ])
 }
 
-function renderBetterRankCell(row, keys) {
-  return h('div', { class: 'better-rank-list' }, keys.slice(0, 4).map((key) => {
-    const metric = findBetterMetric(row, key)
-    const label = metric?.label || betterMetricLabel(key)
-    const value = metric?.candidateRank && metric?.rankTotal
-      ? `第 ${metric.candidateRank}/${metric.rankTotal}`
-      : '暂无排名'
-    const compare = metric?.referenceRank && metric?.rankTotal
-      ? `当前 ${metric.referenceRank}/${metric.rankTotal}`
-      : ''
-    return h('div', { class: 'better-rank-row', key }, [
-      h('span', { class: 'better-rank-label' }, label),
-      h('span', { class: 'better-rank-value' }, value),
-      compare ? h('span', { class: 'better-rank-compare muted' }, compare) : null
+function getOfficialRankPair(row, key) {
+  const reference = betterResult.value?.reference || null
+  if (!reference) return null
+  switch (key) {
+    case 'rank1m':
+      return {
+        candidateRank: Number(row?.stageRank1m || 0),
+        candidateTotal: Number(row?.stageRank1mTotal || 0),
+        referenceRank: Number(reference.stageRank1m || 0),
+        referenceTotal: Number(reference.stageRank1mTotal || 0)
+      }
+    case 'rank3m':
+      return {
+        candidateRank: Number(row?.stageRank3m || 0),
+        candidateTotal: Number(row?.stageRank3mTotal || 0),
+        referenceRank: Number(reference.stageRank3m || 0),
+        referenceTotal: Number(reference.stageRank3mTotal || 0)
+      }
+    case 'rank6m':
+      return {
+        candidateRank: Number(row?.stageRank6m || 0),
+        candidateTotal: Number(row?.stageRank6mTotal || 0),
+        referenceRank: Number(reference.stageRank6m || 0),
+        referenceTotal: Number(reference.stageRank6mTotal || 0)
+      }
+    case 'rank12m':
+      return {
+        candidateRank: Number(row?.stageRank12m || 0),
+        candidateTotal: Number(row?.stageRank12mTotal || 0),
+        referenceRank: Number(reference.stageRank12m || 0),
+        referenceTotal: Number(reference.stageRank12mTotal || 0)
+      }
+    default:
+      return null
+  }
+}
+
+function formatRankValue(rank, total) {
+  if (!rank || !total) {
+    return '-'
+  }
+  return `${rank}/${total}`
+}
+
+function compareRankPair(pair) {
+  if (!pair || !pair.candidateRank || !pair.referenceRank) {
+    return { icon: '—', label: '待补', tone: 'muted' }
+  }
+  if (pair.candidateRank === pair.referenceRank) {
+    return { icon: '→', label: '持平', tone: 'muted' }
+  }
+  return pair.candidateRank < pair.referenceRank
+    ? { icon: '↑', label: '候选更优', tone: 'profit-text' }
+    : { icon: '↓', label: '当前更优', tone: 'loss-text' }
+}
+
+function renderBetterOfficialRankTable(row) {
+  const rows = officialRankKeys().map((key) => {
+    const pair = getOfficialRankPair(row, key)
+    const decision = compareRankPair(pair)
+    return h('tr', { key }, [
+      h('td', { class: 'better-table-label' }, betterMetricLabel(key)),
+      h('td', {}, formatRankValue(pair?.candidateRank, pair?.candidateTotal)),
+      h('td', {}, formatRankValue(pair?.referenceRank, pair?.referenceTotal)),
+      h('td', {}, [
+        h('span', { class: ['better-direction', decision.tone] }, `${decision.icon} ${decision.label}`)
+      ])
     ])
-  }))
+  })
+
+  return h('div', { class: 'better-panel-card' }, [
+    h('div', { class: 'better-panel-title' }, '东方财富官网同类排名'),
+    h('table', { class: 'better-mini-table' }, [
+      h('thead', {}, [
+        h('tr', {}, [
+          h('th', {}, '周期'),
+          h('th', {}, '候选'),
+          h('th', {}, '当前'),
+          h('th', {}, '判断')
+        ])
+      ]),
+      h('tbody', {}, rows)
+    ])
+  ])
 }
 
 function renderBetterReasonCell(row) {
+  const highlights = (row.reasons || []).slice(0, 3)
   return h('div', { class: 'better-reason-card' }, [
-    h('div', { class: 'better-reason-summary' }, row.reasonSummary || (row.reasons || []).join(' / ') || '-'),
-    h('div', { class: 'better-reason-meta muted' }, `${row.scopeLabel || '基金池对比'} · 综合分 ${formatBetterScore(row.betterScore)}`)
+    h('div', { class: 'better-reason-summary' }, row.reasonSummary || '综合表现更优'),
+    h('div', { class: 'better-reason-meta muted' }, `${row.scopeLabel || '基金池对比'} · 综合分 ${formatBetterScore(row.betterScore)}`),
+    highlights.length
+      ? h('div', { class: 'better-reason-list' }, highlights.map((item, index) => h('div', { class: 'better-reason-item', key: `${row.code}-${index}` }, item)))
+      : null
   ])
 }
 
@@ -670,11 +867,25 @@ async function loadData() {
   try {
     rows.value = (await GetFollowedFund()) || []
     checkedRowKeys.value = checkedRowKeys.value.filter((code) => rows.value.some((row) => row.code === code))
+    loadRecommendationStatus(true)
   } catch (error) {
     console.error(error)
     message.error('基金自选加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadRecommendationStatus(autoStart = false) {
+  const getter = window.go?.main?.App?.GetFundRecommendationRefreshStatus
+  if (typeof getter !== 'function') {
+    recommendationStatus.value = null
+    return
+  }
+  try {
+    recommendationStatus.value = await getter(Boolean(autoStart))
+  } catch (error) {
+    console.error(error)
   }
 }
 
@@ -905,8 +1116,12 @@ function openBetter(row) {
   activeFund.value = normalizeWatchFund(row)
   betterReferenceCode.value = row.code
   sameTypeOnly.value = true
+  betterSameSubTypeOnly.value = false
+  betterFeeFree7.value = true
+  betterFeeFree30.value = true
+  betterIncludeAClass.value = false
   betterDimension.value = 'balanced'
-   showBetterAI.value = false
+  showBetterAI.value = false
   showBetterModal.value = true
   loadBetterFunds()
 }
@@ -919,14 +1134,20 @@ function openBetterAI() {
   showBetterAI.value = true
 }
 
-async function loadBetterFunds() {
+async function loadBetterFunds(forceRefresh = false) {
   if (!betterReferenceCode.value) return
   betterLoading.value = true
   try {
     const result = await GetBetterFunds({
       referenceCode: betterReferenceCode.value,
       sameTypeOnly: sameTypeOnly.value,
+      sameSubTypeOnly: betterSameSubTypeOnly.value,
       dimension: betterDimension.value,
+      networkRefresh: Boolean(forceRefresh),
+      feeFree7: betterFeeFree7.value,
+      feeFree30: betterFeeFree30.value,
+      includeAClass: betterIncludeAClass.value,
+      onlyAClass: betterIncludeAClass.value,
       page: 1,
       pageSize: 12
     })
@@ -944,6 +1165,7 @@ function normalizeWatchFund(row) {
   return {
     stockCode: row.code,
     stockName: row.name,
+    trackingTarget: row.fundBasic?.trackingTarget || row.trackingTarget || '',
     fundType: row.fundBasic?.type,
     fundCompany: row.fundBasic?.company,
     fundManager: row.fundBasic?.manager,
@@ -1018,12 +1240,38 @@ function resetGroupModal() {
   editingGroupSource.value = ''
 }
 
+let recommendationStatusTimer = 0
+
 onMounted(() => {
   customGroups.value = loadStoredGroups()
   loadData()
+  recommendationStatusTimer = window.setInterval(() => {
+    if (recommendationStatus.value?.refreshing || Number(recommendationStatus.value?.pendingCount || 0) > 0) {
+      loadRecommendationStatus(false)
+    }
+  }, 15000)
 })
 
-watch(sameTypeOnly, () => {
+onUnmounted(() => {
+  if (recommendationStatusTimer) {
+    window.clearInterval(recommendationStatusTimer)
+    recommendationStatusTimer = 0
+  }
+})
+
+watch(sameTypeOnly, (checked) => {
+  if (!checked) {
+    betterSameSubTypeOnly.value = false
+  }
+})
+
+watch(betterSubTypeDisabled, (disabled) => {
+  if (disabled) {
+    betterSameSubTypeOnly.value = false
+  }
+})
+
+watch([sameTypeOnly, betterSameSubTypeOnly, betterFeeFree7, betterFeeFree30, betterIncludeAClass], () => {
   if (showBetterModal.value) {
     loadBetterFunds()
   }
@@ -1055,6 +1303,7 @@ watch(watchTabs, (tabs) => {
 
 .add-shell,
 .watch-toolbar-card,
+.recommendation-status-card,
 .table-shell {
   padding: 16px;
 }
@@ -1071,6 +1320,54 @@ watch(watchTabs, (tabs) => {
   justify-content: flex-start;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.recommendation-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommendation-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.recommendation-status-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.recommendation-status-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.recommendation-status-badge.running {
+  background: rgba(250, 204, 21, 0.16);
+  color: #facc15;
+}
+
+.recommendation-status-badge.done {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+}
+
+.recommendation-status-summary {
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.recommendation-status-hint {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 13px;
 }
 
 .cell-main,
@@ -1094,6 +1391,13 @@ watch(watchTabs, (tabs) => {
 
 .better-toolbar-left,
 .better-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.better-filter-group {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1178,47 +1482,63 @@ watch(watchTabs, (tabs) => {
   flex-wrap: wrap;
 }
 
-.better-metric-list,
-.better-rank-list,
-.better-reason-card {
+.better-reason-card,
+.better-panel-card {
   min-width: 0;
 }
 
-.better-metric-list,
-.better-rank-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.better-metric-row,
-.better-rank-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.better-metric-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.better-metric-label,
-.better-rank-label {
-  font-weight: 600;
-}
-
-.better-metric-sub,
-.better-rank-compare,
 .better-reason-meta {
   font-size: 12px;
   line-height: 1.5;
 }
 
-.better-rank-value {
+.better-panel-card {
+  background: rgba(7, 17, 32, 0.34);
+  border: 1px solid rgba(91, 214, 185, 0.12);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.better-panel-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.better-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.better-mini-table th,
+.better-mini-table td {
+  padding: 7px 0;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.better-mini-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.better-mini-table th {
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: 600;
+}
+
+.better-table-label {
+  font-weight: 600;
+}
+
+.better-direction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .better-reason-card {
@@ -1235,9 +1555,24 @@ watch(watchTabs, (tabs) => {
   margin-top: 6px;
 }
 
+.better-reason-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.better-reason-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 900px) {
-  .better-context-head,
-  .better-metric-head {
+  .better-context-head {
     flex-direction: column;
     align-items: flex-start;
   }

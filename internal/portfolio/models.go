@@ -183,9 +183,11 @@ type FundScreenerItem struct {
 	Code              string   `json:"code"`
 	Name              string   `json:"name"`
 	FundType          string   `json:"fundType"`
+	TrackingTarget    string   `json:"trackingTarget"`
 	Category          string   `json:"category"`
 	CategoryLabel     string   `json:"categoryLabel"`
 	RiskLevel         string   `json:"riskLevel"`
+	RedeemFeeFreeDays int      `json:"redeemFeeFreeDays"`
 	Company           string   `json:"company"`
 	Manager           string   `json:"manager"`
 	Rating            string   `json:"rating"`
@@ -198,10 +200,20 @@ type FundScreenerItem struct {
 	NetGrowth3        *float64 `json:"netGrowth3"`
 	NetGrowth6        *float64 `json:"netGrowth6"`
 	NetGrowth12       *float64 `json:"netGrowth12"`
+	MaxDrawdown3      *float64 `json:"maxDrawdown3"`
+	MaxDrawdown6      *float64 `json:"maxDrawdown6"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`
 	Volatility12      *float64 `json:"volatility12"`
 	Sharpe12          *float64 `json:"sharpe12"`
 	Calmar12          *float64 `json:"calmar12"`
+	StageRank1M       int      `json:"stageRank1m"`
+	StageRank1MTotal  int      `json:"stageRank1mTotal"`
+	StageRank3M       int      `json:"stageRank3m"`
+	StageRank3MTotal  int      `json:"stageRank3mTotal"`
+	StageRank6M       int      `json:"stageRank6m"`
+	StageRank6MTotal  int      `json:"stageRank6mTotal"`
+	StageRank12M      int      `json:"stageRank12m"`
+	StageRank12MTotal int      `json:"stageRank12mTotal"`
 	ScreenUpdatedAt   string   `json:"screenUpdatedAt"`
 	Watchlist         bool     `json:"watchlist"`
 }
@@ -242,11 +254,17 @@ type FundRefreshStatus struct {
 }
 
 type BetterFundQuery struct {
-	ReferenceCode string `json:"referenceCode"`
-	SameTypeOnly  bool   `json:"sameTypeOnly"`
-	Dimension     string `json:"dimension"`
-	Page          int    `json:"page"`
-	PageSize      int    `json:"pageSize"`
+	ReferenceCode   string `json:"referenceCode"`
+	SameTypeOnly    bool   `json:"sameTypeOnly"`
+	SameSubTypeOnly bool   `json:"sameSubTypeOnly"`
+	Dimension       string `json:"dimension"`
+	NetworkRefresh  bool   `json:"networkRefresh"`
+	FeeFree7        bool   `json:"feeFree7"`
+	FeeFree30       bool   `json:"feeFree30"`
+	IncludeAClass   bool   `json:"includeAClass"`
+	OnlyAClass      bool   `json:"onlyAClass"`
+	Page            int    `json:"page"`
+	PageSize        int    `json:"pageSize"`
 }
 
 type BetterFundCandidate struct {
@@ -284,12 +302,72 @@ type BetterFundResult struct {
 	SortLabel        string                `json:"sortLabel"`
 	ScopeLabel       string                `json:"scopeLabel"`
 	ComparedUniverse int                   `json:"comparedUniverse"`
+	UniverseTotal    int                   `json:"universeTotal"`
+	RefreshedCount   int                   `json:"refreshedCount"`
+	NetworkRefresh   bool                  `json:"networkRefresh"`
 	FallbackApplied  bool                  `json:"fallbackApplied"`
 	DataHint         string                `json:"dataHint"`
 	Total            int64                 `json:"total"`
 	Page             int                   `json:"page"`
 	PageSize         int                   `json:"pageSize"`
 	RefreshStatus    FundRefreshStatus     `json:"refreshStatus"`
+}
+
+type FundRecommendationCache struct {
+	gorm.Model
+	ReferenceCode    string `json:"referenceCode" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:1"`
+	RefreshDate      string `json:"refreshDate" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:2;index"`
+	SameTypeOnly     bool   `json:"sameTypeOnly" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:3"`
+	SameSubTypeOnly  bool   `json:"sameSubTypeOnly" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:4"`
+	Dimension        string `json:"dimension" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:5"`
+	FeeFree7         bool   `json:"feeFree7" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:6"`
+	FeeFree30        bool   `json:"feeFree30" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:7"`
+	IncludeAClass    bool   `json:"includeAClass" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:8"`
+	OnlyAClass       bool   `json:"onlyAClass" gorm:"index:idx_fund_recommendation_cache_ref_date_scope,priority:9"`
+	ScopeLabel       string `json:"scopeLabel"`
+	SortLabel        string `json:"sortLabel"`
+	FallbackApplied  bool   `json:"fallbackApplied"`
+	ComparedUniverse int    `json:"comparedUniverse"`
+	UniverseTotal    int    `json:"universeTotal"`
+	DataHint         string `json:"dataHint" gorm:"type:text"`
+	CandidatesJSON   string `json:"candidatesJson" gorm:"type:text"`
+}
+
+func (FundRecommendationCache) TableName() string {
+	return "fund_recommendation_cache"
+}
+
+type FundRecommendationProgress struct {
+	gorm.Model
+	ReferenceCode    string `json:"referenceCode" gorm:"index:idx_fund_recommendation_progress_ref_date,priority:1"`
+	RefreshDate      string `json:"refreshDate" gorm:"index:idx_fund_recommendation_progress_ref_date,priority:2;index"`
+	Status           string `json:"status" gorm:"index"`
+	CurrentPhase     string `json:"currentPhase"`
+	Message          string `json:"message" gorm:"type:text"`
+	LastError        string `json:"lastError" gorm:"type:text"`
+	ComparedUniverse int    `json:"comparedUniverse"`
+	UniverseTotal    int    `json:"universeTotal"`
+}
+
+func (FundRecommendationProgress) TableName() string {
+	return "fund_recommendation_progress"
+}
+
+type FundRecommendationRefreshStatus struct {
+	State           string `json:"state"`
+	StateLabel      string `json:"stateLabel"`
+	Refreshing      bool   `json:"refreshing"`
+	Triggered       bool   `json:"triggered"`
+	CurrentDate     string `json:"currentDate"`
+	WatchlistCount  int64  `json:"watchlistCount"`
+	CompletedCount  int64  `json:"completedCount"`
+	PendingCount    int64  `json:"pendingCount"`
+	FailedCount     int64  `json:"failedCount"`
+	ProgressCurrent int64  `json:"progressCurrent"`
+	ProgressTotal   int64  `json:"progressTotal"`
+	CurrentCode     string `json:"currentCode"`
+	LastRefreshHint string `json:"lastRefreshHint"`
+	Message         string `json:"message"`
 }
 
 type FundCompareQuery struct {

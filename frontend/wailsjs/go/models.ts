@@ -1191,10 +1191,21 @@ export namespace data {
 	    netGrowthYTD?: number;
 	    netGrowthAll?: number;
 	    netGrowth7?: number;
+	    maxDrawdown3?: number;
+	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
 	    volatility12?: number;
 	    sharpe12?: number;
 	    calmar12?: number;
+	    stageRank1m: number;
+	    stageRank1mTotal: number;
+	    stageRank3m: number;
+	    stageRank3mTotal: number;
+	    stageRank6m: number;
+	    stageRank6mTotal: number;
+	    stageRank12m: number;
+	    stageRank12mTotal: number;
+	    redeemFeeFreeDays: number;
 	    topIndustry: string;
 	    topIndustryWeight?: number;
 	    topIndustryDate: string;
@@ -1234,10 +1245,21 @@ export namespace data {
 	        this.netGrowthYTD = source["netGrowthYTD"];
 	        this.netGrowthAll = source["netGrowthAll"];
 	        this.netGrowth7 = source["netGrowth7"];
+	        this.maxDrawdown3 = source["maxDrawdown3"];
+	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
 	        this.volatility12 = source["volatility12"];
 	        this.sharpe12 = source["sharpe12"];
 	        this.calmar12 = source["calmar12"];
+	        this.stageRank1m = source["stageRank1m"];
+	        this.stageRank1mTotal = source["stageRank1mTotal"];
+	        this.stageRank3m = source["stageRank3m"];
+	        this.stageRank3mTotal = source["stageRank3mTotal"];
+	        this.stageRank6m = source["stageRank6m"];
+	        this.stageRank6mTotal = source["stageRank6mTotal"];
+	        this.stageRank12m = source["stageRank12m"];
+	        this.stageRank12mTotal = source["stageRank12mTotal"];
+	        this.redeemFeeFreeDays = source["redeemFeeFreeDays"];
 	        this.topIndustry = source["topIndustry"];
 	        this.topIndustryWeight = source["topIndustryWeight"];
 	        this.topIndustryDate = source["topIndustryDate"];
@@ -2648,9 +2670,11 @@ export namespace portfolio {
 	    code: string;
 	    name: string;
 	    fundType: string;
+	    trackingTarget: string;
 	    category: string;
 	    categoryLabel: string;
 	    riskLevel: string;
+	    redeemFeeFreeDays: number;
 	    company: string;
 	    manager: string;
 	    rating: string;
@@ -2663,10 +2687,20 @@ export namespace portfolio {
 	    netGrowth3?: number;
 	    netGrowth6?: number;
 	    netGrowth12?: number;
+	    maxDrawdown3?: number;
+	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
 	    volatility12?: number;
 	    sharpe12?: number;
 	    calmar12?: number;
+	    stageRank1m: number;
+	    stageRank1mTotal: number;
+	    stageRank3m: number;
+	    stageRank3mTotal: number;
+	    stageRank6m: number;
+	    stageRank6mTotal: number;
+	    stageRank12m: number;
+	    stageRank12mTotal: number;
 	    screenUpdatedAt: string;
 	    watchlist: boolean;
 	    recommendationRank: number;
@@ -2686,9 +2720,11 @@ export namespace portfolio {
 	        this.code = source["code"];
 	        this.name = source["name"];
 	        this.fundType = source["fundType"];
+	        this.trackingTarget = source["trackingTarget"];
 	        this.category = source["category"];
 	        this.categoryLabel = source["categoryLabel"];
 	        this.riskLevel = source["riskLevel"];
+	        this.redeemFeeFreeDays = source["redeemFeeFreeDays"];
 	        this.company = source["company"];
 	        this.manager = source["manager"];
 	        this.rating = source["rating"];
@@ -2701,10 +2737,20 @@ export namespace portfolio {
 	        this.netGrowth3 = source["netGrowth3"];
 	        this.netGrowth6 = source["netGrowth6"];
 	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown3 = source["maxDrawdown3"];
+	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
 	        this.volatility12 = source["volatility12"];
 	        this.sharpe12 = source["sharpe12"];
 	        this.calmar12 = source["calmar12"];
+	        this.stageRank1m = source["stageRank1m"];
+	        this.stageRank1mTotal = source["stageRank1mTotal"];
+	        this.stageRank3m = source["stageRank3m"];
+	        this.stageRank3mTotal = source["stageRank3mTotal"];
+	        this.stageRank6m = source["stageRank6m"];
+	        this.stageRank6mTotal = source["stageRank6mTotal"];
+	        this.stageRank12m = source["stageRank12m"];
+	        this.stageRank12mTotal = source["stageRank12mTotal"];
 	        this.screenUpdatedAt = source["screenUpdatedAt"];
 	        this.watchlist = source["watchlist"];
 	        this.recommendationRank = source["recommendationRank"];
@@ -2738,7 +2784,13 @@ export namespace portfolio {
 	export class BetterFundQuery {
 	    referenceCode: string;
 	    sameTypeOnly: boolean;
+	    sameSubTypeOnly: boolean;
 	    dimension: string;
+	    networkRefresh: boolean;
+	    feeFree7: boolean;
+	    feeFree30: boolean;
+	    includeAClass: boolean;
+	    onlyAClass: boolean;
 	    page: number;
 	    pageSize: number;
 	
@@ -2750,7 +2802,13 @@ export namespace portfolio {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.referenceCode = source["referenceCode"];
 	        this.sameTypeOnly = source["sameTypeOnly"];
+	        this.sameSubTypeOnly = source["sameSubTypeOnly"];
 	        this.dimension = source["dimension"];
+	        this.networkRefresh = source["networkRefresh"];
+	        this.feeFree7 = source["feeFree7"];
+	        this.feeFree30 = source["feeFree30"];
+	        this.includeAClass = source["includeAClass"];
+	        this.onlyAClass = source["onlyAClass"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	    }
@@ -2805,9 +2863,11 @@ export namespace portfolio {
 	    code: string;
 	    name: string;
 	    fundType: string;
+	    trackingTarget: string;
 	    category: string;
 	    categoryLabel: string;
 	    riskLevel: string;
+	    redeemFeeFreeDays: number;
 	    company: string;
 	    manager: string;
 	    rating: string;
@@ -2820,10 +2880,20 @@ export namespace portfolio {
 	    netGrowth3?: number;
 	    netGrowth6?: number;
 	    netGrowth12?: number;
+	    maxDrawdown3?: number;
+	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
 	    volatility12?: number;
 	    sharpe12?: number;
 	    calmar12?: number;
+	    stageRank1m: number;
+	    stageRank1mTotal: number;
+	    stageRank3m: number;
+	    stageRank3mTotal: number;
+	    stageRank6m: number;
+	    stageRank6mTotal: number;
+	    stageRank12m: number;
+	    stageRank12mTotal: number;
 	    screenUpdatedAt: string;
 	    watchlist: boolean;
 	
@@ -2836,9 +2906,11 @@ export namespace portfolio {
 	        this.code = source["code"];
 	        this.name = source["name"];
 	        this.fundType = source["fundType"];
+	        this.trackingTarget = source["trackingTarget"];
 	        this.category = source["category"];
 	        this.categoryLabel = source["categoryLabel"];
 	        this.riskLevel = source["riskLevel"];
+	        this.redeemFeeFreeDays = source["redeemFeeFreeDays"];
 	        this.company = source["company"];
 	        this.manager = source["manager"];
 	        this.rating = source["rating"];
@@ -2851,10 +2923,20 @@ export namespace portfolio {
 	        this.netGrowth3 = source["netGrowth3"];
 	        this.netGrowth6 = source["netGrowth6"];
 	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown3 = source["maxDrawdown3"];
+	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
 	        this.volatility12 = source["volatility12"];
 	        this.sharpe12 = source["sharpe12"];
 	        this.calmar12 = source["calmar12"];
+	        this.stageRank1m = source["stageRank1m"];
+	        this.stageRank1mTotal = source["stageRank1mTotal"];
+	        this.stageRank3m = source["stageRank3m"];
+	        this.stageRank3mTotal = source["stageRank3mTotal"];
+	        this.stageRank6m = source["stageRank6m"];
+	        this.stageRank6mTotal = source["stageRank6mTotal"];
+	        this.stageRank12m = source["stageRank12m"];
+	        this.stageRank12mTotal = source["stageRank12mTotal"];
 	        this.screenUpdatedAt = source["screenUpdatedAt"];
 	        this.watchlist = source["watchlist"];
 	    }
@@ -2866,6 +2948,9 @@ export namespace portfolio {
 	    sortLabel: string;
 	    scopeLabel: string;
 	    comparedUniverse: number;
+	    universeTotal: number;
+	    refreshedCount: number;
+	    networkRefresh: boolean;
 	    fallbackApplied: boolean;
 	    dataHint: string;
 	    total: number;
@@ -2885,6 +2970,9 @@ export namespace portfolio {
 	        this.sortLabel = source["sortLabel"];
 	        this.scopeLabel = source["scopeLabel"];
 	        this.comparedUniverse = source["comparedUniverse"];
+	        this.universeTotal = source["universeTotal"];
+	        this.refreshedCount = source["refreshedCount"];
+	        this.networkRefresh = source["networkRefresh"];
 	        this.fallbackApplied = source["fallbackApplied"];
 	        this.dataHint = source["dataHint"];
 	        this.total = source["total"];
@@ -3490,6 +3578,44 @@ export namespace portfolio {
 		    }
 		    return a;
 		}
+	}
+	export class FundRecommendationRefreshStatus {
+	    state: string;
+	    stateLabel: string;
+	    refreshing: boolean;
+	    triggered: boolean;
+	    currentDate: string;
+	    watchlistCount: number;
+	    completedCount: number;
+	    pendingCount: number;
+	    failedCount: number;
+	    progressCurrent: number;
+	    progressTotal: number;
+	    currentCode: string;
+	    lastRefreshHint: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FundRecommendationRefreshStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.stateLabel = source["stateLabel"];
+	        this.refreshing = source["refreshing"];
+	        this.triggered = source["triggered"];
+	        this.currentDate = source["currentDate"];
+	        this.watchlistCount = source["watchlistCount"];
+	        this.completedCount = source["completedCount"];
+	        this.pendingCount = source["pendingCount"];
+	        this.failedCount = source["failedCount"];
+	        this.progressCurrent = source["progressCurrent"];
+	        this.progressTotal = source["progressTotal"];
+	        this.currentCode = source["currentCode"];
+	        this.lastRefreshHint = source["lastRefreshHint"];
+	        this.message = source["message"];
+	    }
 	}
 	
 	

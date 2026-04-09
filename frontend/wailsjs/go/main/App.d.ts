@@ -164,6 +164,8 @@ export function GetFundPortfolioDashboard():Promise<portfolio.FundPortfolioDashb
 
 export function GetFundProfile(arg1:string):Promise<portfolio.FundProfile>;
 
+export function GetFundRecommendationRefreshStatus(arg1:boolean):Promise<portfolio.FundRecommendationRefreshStatus>;
+
 export function GetFundScreener(arg1:portfolio.FundScreenerQuery):Promise<portfolio.FundScreenerResult>;
 
 export function GetGroupList():Promise<Array<data.Group>>;
