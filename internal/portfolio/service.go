@@ -52,6 +52,14 @@ type fundRefreshScopeSnapshot struct {
 	PendingCount int64
 }
 
+type focusedFundRefreshProgress struct {
+	TargetCodes  []string
+	PendingCodes []string
+	TrackedSet   map[string]struct{}
+	Completed    int64
+	Pending      int64
+}
+
 type betterMetricSpec struct {
 	Key     string
 	Label   string
@@ -753,6 +761,10 @@ func (s *Service) runFundScreenerRefresh(limit int, scope string) {
 	var queuedCount int
 	var successCount int
 	today := time.Now().Format("2006-01-02")
+	trackedSet := map[string]struct{}{}
+	if scope == fundRefreshScopeFocused {
+		trackedSet = s.loadFocusedFundRefreshProgress(today).TrackedSet
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			logger.SugaredLogger.Errorf("fund screener refresh panic: %v", r)
@@ -798,6 +810,9 @@ func (s *Service) runFundScreenerRefresh(limit int, scope string) {
 			}()
 			refreshed = s.refreshFundScreeningMetrics(code)
 		}(basic.Code)
+		if _, tracked := trackedSet[strings.TrimSpace(basic.Code)]; tracked {
+			s.refreshFollowedFundMarketData(basic.Code, basic.Name)
+		}
 		if refreshed {
 			successCount++
 		}
@@ -941,12 +956,11 @@ func (s *Service) buildFundRefreshQuery(scope string, today string) *gorm.DB {
 	case fundRefreshScopeAll:
 		return buildPendingFundRefreshQuery(today)
 	default:
-		codes := s.loadFocusedFundRefreshCodes()
-		if len(codes) == 0 {
+		progress := s.loadFocusedFundRefreshProgress(today)
+		if len(progress.PendingCodes) == 0 {
 			return db.Dao.Where("1 = 0")
 		}
-		s.ensureFundBasicsForCodes(codes)
-		return buildPendingFundRefreshQuery(today).Where("code IN ?", codes)
+		return db.Dao.Where("code IN ?", progress.PendingCodes)
 	}
 }
 
@@ -960,12 +974,12 @@ func (s *Service) loadFundRefreshScopeSnapshot(scope string, today string, unive
 			PendingCount: loadPendingFundRefreshCount(today),
 		}
 	default:
-		codes := s.loadFocusedFundRefreshCodes()
+		progress := s.loadFocusedFundRefreshProgress(today)
 		return fundRefreshScopeSnapshot{
 			Scope:        fundRefreshScopeFocused,
-			TargetCount:  int64(len(codes)),
-			UpdatedToday: loadUpdatedTodayFundCountByCodes(codes, today),
-			PendingCount: loadPendingFundRefreshCountByCodes(codes, today),
+			TargetCount:  int64(len(progress.TargetCodes)),
+			UpdatedToday: progress.Completed,
+			PendingCount: progress.Pending,
 		}
 	}
 }
@@ -996,13 +1010,7 @@ func loadPendingFundRefreshCountByCodes(codes []string, today string) int64 {
 
 func (s *Service) loadFocusedFundRefreshCodes() []string {
 	codeSet := make(map[string]struct{})
-	for _, code := range loadFundWatchlistCodes() {
-		if trimmed := strings.TrimSpace(code); trimmed != "" {
-			codeSet[trimmed] = struct{}{}
-		}
-	}
-	holdingCodes := loadFundHoldingCodes()
-	for _, code := range holdingCodes {
+	for _, code := range loadTrackedFundCodes() {
 		if trimmed := strings.TrimSpace(code); trimmed != "" {
 			codeSet[trimmed] = struct{}{}
 		}
@@ -1021,6 +1029,87 @@ func (s *Service) loadFocusedFundRefreshCodes() []string {
 	}
 
 	return sortedCodeKeys(codeSet)
+}
+
+func loadTrackedFundCodes() []string {
+	codeSet := make(map[string]struct{})
+	for _, code := range loadFundWatchlistCodes() {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+	for _, code := range loadFundHoldingCodes() {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			codeSet[trimmed] = struct{}{}
+		}
+	}
+	return sortedCodeKeys(codeSet)
+}
+
+func (s *Service) loadFocusedFundRefreshProgress(today string) focusedFundRefreshProgress {
+	targetCodes := s.loadFocusedFundRefreshCodes()
+	if len(targetCodes) == 0 {
+		return focusedFundRefreshProgress{
+			TargetCodes:  []string{},
+			PendingCodes: []string{},
+			TrackedSet:   map[string]struct{}{},
+		}
+	}
+
+	trackedSet := make(map[string]struct{})
+	for _, code := range loadTrackedFundCodes() {
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			trackedSet[trimmed] = struct{}{}
+		}
+	}
+
+	var basics []data.FundBasic
+	db.Dao.Where("code IN ?", targetCodes).Find(&basics)
+	basicMap := make(map[string]data.FundBasic, len(basics))
+	for _, basic := range basics {
+		basicMap[strings.TrimSpace(basic.Code)] = basic
+	}
+
+	followedMap := make(map[string]data.FollowedFund)
+	if len(trackedSet) > 0 {
+		trackedCodes := make([]string, 0, len(trackedSet))
+		for code := range trackedSet {
+			trackedCodes = append(trackedCodes, code)
+		}
+
+		var followed []data.FollowedFund
+		db.Dao.Where("code IN ?", trackedCodes).Find(&followed)
+		for _, item := range followed {
+			followedMap[strings.TrimSpace(item.Code)] = item
+		}
+	}
+
+	now := time.Now()
+	var completed int64
+	pendingCodes := make([]string, 0, len(targetCodes))
+	for _, code := range targetCodes {
+		basic, ok := basicMap[code]
+		if !ok || !isSameTradingDayString(basic.ScreenUpdatedAt, now) {
+			pendingCodes = append(pendingCodes, code)
+			continue
+		}
+		if _, tracked := trackedSet[code]; tracked {
+			followed, ok := followedMap[code]
+			if !ok || !isSameTradingDayTime(followed.UpdatedAt, now) {
+				pendingCodes = append(pendingCodes, code)
+				continue
+			}
+		}
+		completed++
+	}
+
+	return focusedFundRefreshProgress{
+		TargetCodes:  targetCodes,
+		PendingCodes: pendingCodes,
+		TrackedSet:   trackedSet,
+		Completed:    completed,
+		Pending:      int64(len(pendingCodes)),
+	}
 }
 
 func loadFundWatchlistCodes() []string {
@@ -1837,6 +1926,19 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 	return db.Dao.Model(&data.FundBasic{}).Where("code = ?", code).Updates(updates).Error == nil
 }
 
+func (s *Service) refreshFollowedFundMarketData(code string, fallbackName string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return
+	}
+
+	ensureFollowedFund(code, strings.TrimSpace(fallbackName))
+
+	api := data.NewFundApi()
+	api.CrawlFundNetUnitValue(code)
+	api.CrawlFundNetEstimatedUnit(code)
+}
+
 func normalizeFundStagePeriod(raw string) string {
 	period := strings.TrimSpace(strings.ReplaceAll(raw, " ", ""))
 	switch {
@@ -2594,6 +2696,13 @@ func isSameTradingDayString(value string, target time.Time) bool {
 		}
 	}
 	return strings.HasPrefix(text, target.Format("2006-01-02"))
+}
+
+func isSameTradingDayTime(value time.Time, target time.Time) bool {
+	if value.IsZero() {
+		return false
+	}
+	return value.In(target.Location()).Format("2006-01-02") == target.Format("2006-01-02")
 }
 
 func normalizeFundUpdateTime(value string) string {

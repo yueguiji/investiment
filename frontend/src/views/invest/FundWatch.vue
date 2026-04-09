@@ -438,12 +438,16 @@ const columns = [
     render: (row) => h('div', { class: 'cell-stack' }, [
       h(
         NText,
-        { type: Number(row.netEstimatedRate || 0) >= 0 ? 'error' : 'success' },
+        {
+          type: row.netEstimatedUnit
+            ? (Number(row.netEstimatedRate || 0) >= 0 ? 'error' : 'success')
+            : 'default'
+        },
         {
           default: () => (
             row.netEstimatedUnit
               ? Number(row.netEstimatedUnit).toFixed(4) + ' / ' + signedPercent(row.netEstimatedRate) + '%'
-              : '暂无估算'
+              : (row.netUnitValue ? Number(row.netUnitValue).toFixed(4) + ' / 最新净值' : '暂无估算')
           )
         }
       ),
