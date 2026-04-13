@@ -30,16 +30,16 @@ export function AddTransaction(arg1) {
   return window['go']['main']['App']['AddTransaction'](arg1);
 }
 
-export function AnalyzeBetterFundsWithAI(arg1, arg2, arg3) {
-  return window['go']['main']['App']['AnalyzeBetterFundsWithAI'](arg1, arg2, arg3);
+export function AnalyzeBetterFundsWithAI(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AnalyzeBetterFundsWithAI'](arg1, arg2, arg3, arg4);
 }
 
-export function AnalyzeFundCollectionWithAI(arg1, arg2) {
-  return window['go']['main']['App']['AnalyzeFundCollectionWithAI'](arg1, arg2);
+export function AnalyzeFundCollectionWithAI(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['AnalyzeFundCollectionWithAI'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function AnalyzeFundWithAI(arg1, arg2) {
-  return window['go']['main']['App']['AnalyzeFundWithAI'](arg1, arg2);
+export function AnalyzeFundWithAI(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AnalyzeFundWithAI'](arg1, arg2, arg3);
 }
 
 export function AnalyzeQuantLinkageWithAI(arg1, arg2) {
@@ -406,8 +406,16 @@ export function GetLatestHouseholdAIAnalysis() {
   return window['go']['main']['App']['GetLatestHouseholdAIAnalysis']();
 }
 
+export function GetLatestPortfolioExpectationAIAnalysis() {
+  return window['go']['main']['App']['GetLatestPortfolioExpectationAIAnalysis']();
+}
+
 export function GetMoneyRankSina(arg1) {
   return window['go']['main']['App']['GetMoneyRankSina'](arg1);
+}
+
+export function GetPortfolioExpectationSummary() {
+  return window['go']['main']['App']['GetPortfolioExpectationSummary']();
 }
 
 export function GetPortfolioSummary() {
@@ -560,6 +568,10 @@ export function RenameFundWatchGroup(arg1, arg2) {
 
 export function RunHouseholdAIAnalysis(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['RunHouseholdAIAnalysis'](arg1, arg2, arg3, arg4);
+}
+
+export function RunPortfolioExpectationAIAnalysis(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunPortfolioExpectationAIAnalysis'](arg1, arg2, arg3);
 }
 
 export function SaveAIResponseResult(arg1, arg2, arg3, arg4, arg5, arg6) {

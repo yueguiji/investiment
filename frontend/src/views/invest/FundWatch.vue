@@ -6,29 +6,27 @@
           <n-button :disabled="checkedRowKeys.length < 2" @click="showCompareModal = true">
             基金对比{{ checkedRowKeys.length ? ` (${checkedRowKeys.length})` : '' }}
           </n-button>
-          <n-button @click="showCollectionAI = true">AI 分析关注池</n-button>
+          <n-button :disabled="groupRows.length === 0" @click="showCollectionAI = true">AI分析当前页签</n-button>
           <n-button :loading="loading" @click="loadData">刷新列表</n-button>
         </n-space>
       </template>
     </n-page-header>
 
     <div class="platform-card add-shell">
-      <n-grid :cols="24" :x-gap="12">
-        <n-gi :span="10">
-          <n-auto-complete
-            v-model:value="addKeyword"
-            :options="fundOptions"
-            placeholder="输入基金代码或名称，加入自选"
+      <div class="watch-search-bar">
+        <div class="watch-search-main">
+          <n-input
+            v-model:value="filterKeyword"
             clearable
-            @search="searchFunds"
-            @update:value="handleKeywordUpdate"
-            @select="handleSelectFund"
+            placeholder="筛选当前页签里的自选基金，支持代码 / 名称 / 类型 / 跟踪标的"
           />
-        </n-gi>
-        <n-gi :span="8">
-          <n-text depth="3">支持代码、名称模糊检索，加入后可直接做 AI 分析和对比推荐。</n-text>
-        </n-gi>
-      </n-grid>
+          <n-button type="primary" @click="openAddFundModal">加入基金</n-button>
+        </div>
+        <div class="watch-search-meta">
+          <n-text depth="3">{{ filterSummary }}</n-text>
+          <n-text depth="3">需要新增基金时，点右侧“加入基金”后再搜索代码或名称。</n-text>
+        </div>
+      </div>
     </div>
 
     <div class="platform-card watch-toolbar-card">
@@ -92,8 +90,10 @@
     <FundAIAnalysisModal
       v-model:show="showCollectionAI"
       mode="collection"
-      scope="watchlist"
-      title="基金自选 AI 分析"
+      scope="tab"
+      :scope-label="currentWatchTabName"
+      :fund-codes="groupRows.map((item) => item.code)"
+      :title="`${currentWatchTabName} AI 分析`"
     />
 
     <FundAIAnalysisModal
@@ -114,7 +114,28 @@
     <FundCompareModal
       v-model:show="showCompareModal"
       :codes="checkedRowKeys"
+      :tab-label="currentWatchTabName"
     />
+
+    <n-modal
+      v-model:show="showAddFundModal"
+      preset="card"
+      title="加入自选基金"
+      style="width: 560px; max-width: calc(100vw - 32px);"
+    >
+      <n-space vertical size="large">
+        <n-auto-complete
+          v-model:value="addKeyword"
+          :options="fundOptions"
+          placeholder="输入基金代码或名称，加入自选"
+          clearable
+          @search="searchFunds"
+          @update:value="handleKeywordUpdate"
+          @select="handleSelectFund"
+        />
+        <n-text depth="3">支持代码、名称模糊检索；如果你当前停留在某个自定义页签，加入后会自动归到该页签。</n-text>
+      </n-space>
+    </n-modal>
 
     <n-modal
       v-model:show="showGroupModal"
@@ -194,11 +215,12 @@
       </n-tabs>
       <div class="better-table-wrap">
         <n-data-table
+          class="better-result-table"
           :loading="betterLoading"
           :columns="betterColumns"
           :data="betterRows"
           :pagination="{ pageSize: 8 }"
-          :scroll-x="1600"
+          :scroll-x="1680"
         />
       </div>
     </n-modal>
@@ -207,7 +229,8 @@
 
 <script setup>
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NTag, NText, useDialog, useMessage } from 'naive-ui'
+import { NButton, NIcon, NTag, NText, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { AlertCircleOutline } from '@vicons/ionicons5'
 import { FollowFund, GetBetterFunds, GetFollowedFund, GetfundList, OpenURL, UnFollowFund } from '../../../wailsjs/go/main/App'
 import FundInsightDrawer from '../portfolio/components/FundInsightDrawer.vue'
 import FundAIAnalysisModal from '../portfolio/components/FundAIAnalysisModal.vue'
@@ -219,6 +242,7 @@ const loading = ref(false)
 const rows = ref([])
 const fundOptions = ref([])
 const addKeyword = ref('')
+const filterKeyword = ref('')
 const activeFund = ref(null)
 const showDetail = ref(false)
 const showSingleAI = ref(false)
@@ -238,6 +262,7 @@ const checkedRowKeys = ref([])
 const showCompareModal = ref(false)
 const activeGroupTab = ref('__all__')
 const customGroups = ref([])
+const showAddFundModal = ref(false)
 const showGroupModal = ref(false)
 const groupingFund = ref(null)
 const editingGroupName = ref('')
@@ -301,13 +326,37 @@ const watchTabs = computed(() => {
   ]
 })
 
-const filteredRows = computed(() => {
+const currentWatchTabLabel = computed(() => {
+  const current = watchTabs.value.find((tab) => tab.value === activeGroupTab.value)
+  return current?.label || '当前页签'
+})
+const currentWatchTabName = computed(() => String(currentWatchTabLabel.value || '').replace(/\s*\(\d+\)\s*$/, '') || '当前页签')
+
+const groupRows = computed(() => {
   if (activeGroupTab.value === ALL_GROUP_TAB) return rows.value
   if (activeGroupTab.value === UNGROUPED_GROUP_TAB) {
     return rows.value.filter((row) => !String(row.watchGroup || '').trim())
   }
   return rows.value.filter((row) => String(row.watchGroup || '').trim() === activeGroupTab.value)
 })
+
+const filteredRows = computed(() => {
+  const keyword = normalizeWatchKeyword(filterKeyword.value)
+  if (!keyword) {
+    return groupRows.value
+  }
+  return groupRows.value.filter((row) => matchesWatchKeyword(row, keyword))
+})
+
+const filterSummary = computed(() => {
+  const total = groupRows.value.length
+  const keyword = String(filterKeyword.value || '').trim()
+  if (!keyword) {
+    return `${currentWatchTabName.value} 当前共 ${total} 只基金。`
+  }
+  return `${currentWatchTabName.value} 中，关键词“${keyword}”筛出 ${filteredRows.value.length}/${total} 只基金。`
+})
+
 const sortedRows = computed(() => {
   const list = [...filteredRows.value]
   const { key, order } = watchSortState.value
@@ -486,6 +535,28 @@ function compareNullableValues(left, right, order = 'desc') {
   return order === 'asc' ? diff : -diff
 }
 
+function normalizeWatchKeyword(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function matchesWatchKeyword(row, keyword) {
+  const fields = [
+    row?.name,
+    row?.code,
+    row?.watchGroup,
+    row?.fundBasic?.type,
+    row?.fundBasic?.trackingTarget,
+    row?.trackingTarget,
+    row?.fundBasic?.company,
+    row?.fundBasic?.manager,
+    row?.categoryLabel
+  ]
+  return fields
+    .map((item) => normalizeWatchKeyword(item))
+    .filter(Boolean)
+    .some((item) => item.includes(keyword))
+}
+
 const columns = [
   {
     type: 'selection',
@@ -564,49 +635,111 @@ const columns = [
 
 const betterColumns = computed(() => [
   {
-    title: '排序',
+    title: () => renderBetterColumnHeader('排序', 'score'),
     key: 'recommendationRank',
-    width: 100,
-    render: (row) => h('div', { class: 'better-order' }, [
-      h('strong', { class: 'better-order-rank' }, `#${row.recommendationRank || '-'}`),
-      h('div', { class: 'cell-meta' }, `得分 ${formatBetterScore(row.betterScore)}`)
-    ])
+    width: 160,
+    render: (row) => renderBetterScoreCell(row)
   },
   {
-    title: '候选基金',
+    title: () => renderBetterColumnHeader('候选基金'),
     key: 'name',
-    width: 260,
-    render: (row) => h('div', { class: 'cell-main' }, [
+    width: 250,
+    render: (row) => h('div', { class: 'better-candidate-cell' }, [
       h(NButton, { text: true, type: 'primary', onClick: () => openExternal(row.code) }, () => row.name || row.code),
-      h('div', { class: 'cell-meta' }, row.code),
-      h('div', { class: 'better-tag-row' }, [
-        h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => row.categoryLabel || row.fundType || '基金' }),
-        h('span', { class: 'cell-meta' }, row.fundType || '-')
+      h('div', { class: 'better-candidate-meta' }, [
+        h('span', { class: 'cell-meta better-candidate-code' }, row.code),
+        h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => row.categoryLabel || row.fundType || '基金' })
       ])
     ])
   },
   {
-    title: '主要指标对比',
+    title: () => renderBetterColumnHeader('主要指标对比'),
     key: 'comparison',
-    width: 520,
+    width: 560,
     render: (row) => renderBetterComparisonTable(row)
   },
   {
-    title: '官网同类排名',
+    title: () => renderBetterColumnHeader('官网同类排名'),
     key: 'peerRanks',
-    width: 320,
+    width: 380,
     render: (row) => renderBetterOfficialRankTable(row)
   },
   {
-    title: '结论',
+    title: () => renderBetterColumnHeader('结论'),
     key: 'reasons',
-    width: 260,
+    width: 220,
     render: (row) => renderBetterReasonCell(row)
   }
 ])
 
+function renderBetterColumnHeader(title, helpKey = '') {
+  return h('div', { class: 'better-column-header' }, [
+    h('span', null, title),
+    helpKey ? renderBetterHeaderHelp(helpKey) : null
+  ])
+}
+
+function renderBetterHeaderHelp(helpKey) {
+  return h(
+    NTooltip,
+    { placement: 'top-start', style: { maxWidth: '360px' } },
+    {
+      trigger: () => h(
+        'span',
+        { class: 'help-icon-trigger', title: '评分说明', 'aria-label': '评分说明' },
+        [h(NIcon, { class: 'help-icon', size: 15 }, { default: () => h(AlertCircleOutline) })]
+      ),
+      default: () => buildBetterHelpContent(helpKey)
+    }
+  )
+}
+
+function buildBetterHelpContent(helpKey) {
+  if (helpKey !== 'score') {
+    return h('div', { class: 'score-tooltip' }, '当前列说明')
+  }
+  return h('div', { class: 'score-tooltip' }, [
+    h('div', { class: 'score-tooltip-title' }, '得分说明'),
+    h('div', { class: 'score-tooltip-line' }, '这是候选基金相对当前基金的加权优势分，不是绝对买入分。'),
+    h('div', { class: 'score-tooltip-line' }, '近期 1-3 个月收益和回撤权重更高，同类排名、夏普和 Calmar 也会参与加分。'),
+    h('div', { class: 'score-tooltip-line' }, '分段只用于当前参考基金和当前样本池的相对比较：'),
+    h('div', { class: 'score-tooltip-line' }, '100 分以上：强烈优先关注'),
+    h('div', { class: 'score-tooltip-line' }, '60-100 分：优先关注'),
+    h('div', { class: 'score-tooltip-line' }, '25-60 分：可做备选'),
+    h('div', { class: 'score-tooltip-line' }, '25 分以下：仅观察')
+  ])
+}
+
+function renderBetterScoreCell(row) {
+  return h('div', { class: 'better-order' }, [
+    h('strong', { class: 'better-order-rank' }, `#${row.recommendationRank || '-'}`),
+    h('span', { class: 'cell-meta' }, `得分 ${formatBetterScore(row.betterScore)}`)
+  ])
+}
+
+function renderBetterMiniTable(title, columns, rows) {
+  return h('div', { class: 'better-panel-card' }, [
+    h('table', { class: 'better-mini-table' }, [
+      h('colgroup', {}, columns.map((column) => h('col', {
+        key: column.key,
+        style: { width: column.width }
+      }))),
+      h('thead', {}, [
+        h('tr', { class: 'better-mini-table-caption-row' }, [
+          h('th', { colspan: columns.length, class: 'better-mini-table-caption' }, title)
+        ]),
+        h('tr', {}, columns.map((column) => h('th', {
+          key: column.key,
+          class: column.numeric ? 'is-number' : ''
+        }, column.label)))
+      ]),
+      h('tbody', {}, rows)
+    ])
+  ])
+}
+
 function comparisonMetricKeys() {
-  return ['growth1', 'growth3', 'growth6', 'growth12', 'drawdown3', 'drawdown6', 'drawdown12', 'sharpe12', 'calmar12']
+  return ['growth1', 'drawdown1', 'growth3', 'drawdown3', 'growth6', 'growth12', 'drawdown6', 'drawdown12', 'sharpe12', 'calmar12']
 }
 
 function officialRankKeys() {
@@ -621,6 +754,7 @@ function betterMetricLabel(key) {
   switch (key) {
     case 'growth7': return '近7天'
     case 'growth1': return '近1月'
+    case 'drawdown1': return '1月最大回撤'
     case 'growth3': return '近3月'
     case 'growth6': return '近6月'
     case 'growth12': return '近1年'
@@ -643,7 +777,7 @@ function isRatioMetric(key) {
 }
 
 function isLowerBetterMetric(key) {
-  return key === 'drawdown3' || key === 'drawdown6' || key === 'drawdown12' || key === 'volatility12'
+  return key === 'drawdown1' || key === 'drawdown3' || key === 'drawdown6' || key === 'drawdown12' || key === 'volatility12'
 }
 
 function formatMetricValue(value, key) {
@@ -687,6 +821,8 @@ function getMetricPair(row, key) {
   switch (key) {
     case 'growth1':
       return { candidate: row?.netGrowth1, reference: reference.netGrowth1 }
+    case 'drawdown1':
+      return { candidate: row?.maxDrawdown1, reference: reference.maxDrawdown1 }
     case 'growth3':
       return { candidate: row?.netGrowth3, reference: reference.netGrowth3 }
     case 'growth6':
@@ -729,28 +865,20 @@ function renderBetterComparisonTable(row) {
     const decision = comparePair(pair?.candidate, pair?.reference, isLowerBetterMetric(key))
     return h('tr', { key }, [
       h('td', { class: 'better-table-label' }, betterMetricLabel(key)),
-      h('td', { class: metricTone(findBetterMetric(row, key), key) }, pair ? formatMetricValue(pair.candidate, key) : '-'),
-      h('td', {}, pair ? formatMetricValue(pair.reference, key) : '-'),
-      h('td', {}, [
+      h('td', { class: ['is-number', metricTone(findBetterMetric(row, key), key)] }, pair ? formatMetricValue(pair.candidate, key) : '-'),
+      h('td', { class: 'is-number' }, pair ? formatMetricValue(pair.reference, key) : '-'),
+      h('td', { class: 'better-table-decision' }, [
         h('span', { class: ['better-direction', decision.tone] }, `${decision.icon} ${decision.label}`)
       ])
     ])
   })
 
-  return h('div', { class: 'better-panel-card' }, [
-    h('div', { class: 'better-panel-title' }, '收益 / 回撤 / 风险质量'),
-    h('table', { class: 'better-mini-table' }, [
-      h('thead', {}, [
-        h('tr', {}, [
-          h('th', {}, '指标'),
-          h('th', {}, '候选'),
-          h('th', {}, '当前'),
-          h('th', {}, '判断')
-        ])
-      ]),
-      h('tbody', {}, rows)
-    ])
-  ])
+  return renderBetterMiniTable('收益 / 回撤 / 风险质量', [
+    { key: 'label', label: '指标', width: '31%' },
+    { key: 'candidate', label: '候选', width: '17%', numeric: true },
+    { key: 'reference', label: '当前', width: '17%', numeric: true },
+    { key: 'decision', label: '判断', width: '35%' }
+  ], rows)
 }
 
 function getOfficialRankPair(row, key) {
@@ -815,28 +943,20 @@ function renderBetterOfficialRankTable(row) {
     const decision = compareRankPair(pair)
     return h('tr', { key }, [
       h('td', { class: 'better-table-label' }, betterMetricLabel(key)),
-      h('td', {}, formatRankValue(pair?.candidateRank, pair?.candidateTotal)),
-      h('td', {}, formatRankValue(pair?.referenceRank, pair?.referenceTotal)),
-      h('td', {}, [
+      h('td', { class: 'is-number' }, formatRankValue(pair?.candidateRank, pair?.candidateTotal)),
+      h('td', { class: 'is-number' }, formatRankValue(pair?.referenceRank, pair?.referenceTotal)),
+      h('td', { class: 'better-table-decision' }, [
         h('span', { class: ['better-direction', decision.tone] }, `${decision.icon} ${decision.label}`)
       ])
     ])
   })
 
-  return h('div', { class: 'better-panel-card' }, [
-    h('div', { class: 'better-panel-title' }, '东方财富官网同类排名'),
-    h('table', { class: 'better-mini-table' }, [
-      h('thead', {}, [
-        h('tr', {}, [
-          h('th', {}, '周期'),
-          h('th', {}, '候选'),
-          h('th', {}, '当前'),
-          h('th', {}, '判断')
-        ])
-      ]),
-      h('tbody', {}, rows)
-    ])
-  ])
+  return renderBetterMiniTable('东方财富官网同类排名', [
+    { key: 'label', label: '周期', width: '22%' },
+    { key: 'candidate', label: '候选', width: '22%', numeric: true },
+    { key: 'reference', label: '当前', width: '22%', numeric: true },
+    { key: 'decision', label: '判断', width: '34%' }
+  ], rows)
 }
 
 function renderBetterReasonCell(row) {
@@ -919,12 +1039,19 @@ async function handleSelectFund(code) {
       message.success(result)
       addKeyword.value = ''
       fundOptions.value = []
+      showAddFundModal.value = false
       await loadData()
     }
   } catch (error) {
     console.error(error)
     message.error('加入自选失败')
   }
+}
+
+function openAddFundModal() {
+  addKeyword.value = ''
+  fundOptions.value = []
+  showAddFundModal.value = true
 }
 
 async function unfollow(row) {
@@ -1283,6 +1410,13 @@ watch(showBetterModal, (show) => {
   }
 })
 
+watch(showAddFundModal, (show) => {
+  if (!show) {
+    addKeyword.value = ''
+    fundOptions.value = []
+  }
+})
+
 watch(showGroupModal, (show) => {
   if (!show) resetGroupModal()
 })
@@ -1309,6 +1443,29 @@ watch(watchTabs, (tabs) => {
 }
 
 .watch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.watch-search-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.watch-search-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.watch-search-main :deep(.n-input) {
+  flex: 1;
+}
+
+.watch-search-meta {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1464,6 +1621,35 @@ watch(watchTabs, (tabs) => {
   overflow-x: auto;
 }
 
+.better-column-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e8eef8;
+  text-align: left;
+}
+
+.help-icon-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  cursor: help;
+}
+
+.help-icon {
+  color: rgba(226, 232, 240, 0.88);
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.help-icon-trigger:hover .help-icon {
+  color: #ffffff;
+}
+
 .better-order {
   display: flex;
   flex-direction: column;
@@ -1475,6 +1661,23 @@ watch(watchTabs, (tabs) => {
   color: var(--primary-color);
 }
 
+.score-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.score-tooltip-title {
+  font-weight: 700;
+  color: #eef5ff;
+}
+
+.score-tooltip-line {
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 12px;
+}
+
 .better-tag-row {
   display: flex;
   align-items: center;
@@ -1482,9 +1685,36 @@ watch(watchTabs, (tabs) => {
   flex-wrap: wrap;
 }
 
+.better-candidate-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.better-candidate-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.better-candidate-code {
+  font-variant-numeric: tabular-nums;
+}
+
 .better-reason-card,
 .better-panel-card {
   min-width: 0;
+}
+
+.better-result-table :deep(.n-data-table-th__title) {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.better-result-table :deep(.n-data-table-td) {
+  vertical-align: top;
 }
 
 .better-reason-meta {
@@ -1493,44 +1723,58 @@ watch(watchTabs, (tabs) => {
 }
 
 .better-panel-card {
-  background: rgba(7, 17, 32, 0.34);
-  border: 1px solid rgba(91, 214, 185, 0.12);
-  border-radius: 14px;
-  padding: 14px 16px;
-}
-
-.better-panel-title {
-  margin-bottom: 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .better-mini-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
 
 .better-mini-table th,
 .better-mini-table td {
-  padding: 7px 0;
+  padding: 7px 10px;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.better-mini-table tbody tr:last-child td {
-  border-bottom: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .better-mini-table th {
-  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.045);
+  color: #cbd5e1;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+}
+
+.better-mini-table-caption-row th {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.better-mini-table-caption {
+  text-align: left;
+  color: #e6eef9;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.better-mini-table .is-number {
+  text-align: right;
 }
 
 .better-table-label {
   font-weight: 600;
+  color: #e5edf8;
+}
+
+.better-table-decision {
+  text-align: left;
 }
 
 .better-direction {
@@ -1539,6 +1783,18 @@ watch(watchTabs, (tabs) => {
   gap: 4px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.profit-text {
+  color: #6ee7b7;
+}
+
+.loss-text {
+  color: #fbbf24;
 }
 
 .better-reason-card {
@@ -1572,9 +1828,20 @@ watch(watchTabs, (tabs) => {
 }
 
 @media (max-width: 900px) {
+  .watch-search-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .better-context-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .better-mini-table th,
+  .better-mini-table td {
+    padding: 7px 8px;
+    font-size: 12px;
   }
 }
 </style>

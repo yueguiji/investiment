@@ -220,6 +220,8 @@ type HouseholdProfile struct {
 	MonthlyHousingLoanDeduction          float64 `json:"monthlyHousingLoanDeduction"`
 	MonthlyElderlyCareDeduction          float64 `json:"monthlyElderlyCareDeduction"`
 	MonthlyOtherSpecialDeduction         float64 `json:"monthlyOtherSpecialDeduction"`
+	TargetAnnualReturnRate               float64 `json:"targetAnnualReturnRate"`
+	AnnualUntrackedProfit                float64 `json:"annualUntrackedProfit"`
 	Notes                                string  `json:"notes"`
 }
 

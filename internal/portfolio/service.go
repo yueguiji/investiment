@@ -116,6 +116,7 @@ type betterMetricRank struct {
 }
 
 type fundRiskSnapshot struct {
+	MaxDrawdown1  *float64
 	MaxDrawdown3  *float64
 	MaxDrawdown6  *float64
 	MaxDrawdown12 *float64
@@ -1787,6 +1788,35 @@ func buildCachedBetterFundResult(reference data.FundBasic, watchlist bool, query
 	}
 }
 
+func betterRecommendationCacheStale(cache *FundRecommendationCache, dimension string) bool {
+	if cache == nil {
+		return true
+	}
+	if strings.TrimSpace(cache.SortLabel) != betterSortLabel(dimension) {
+		return true
+	}
+	if strings.TrimSpace(cache.CandidatesJSON) == "" {
+		return false
+	}
+
+	var candidates []BetterFundCandidate
+	if err := json.Unmarshal([]byte(cache.CandidatesJSON), &candidates); err != nil {
+		return true
+	}
+	for _, candidate := range candidates {
+		if len(candidate.Metrics) == 0 {
+			continue
+		}
+		for _, metric := range candidate.Metrics {
+			if metric.Key == "drawdown1" {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func parseComparedUniverseFromHint(hint string) int {
 	hint = strings.TrimSpace(hint)
 	if hint == "" {
@@ -2221,11 +2251,11 @@ func (s *Service) GetBetterFundsCached(query BetterFundQuery) *BetterFundResult 
 		return result
 	}
 
-	if cache, isToday := loadFundRecommendationCache(code, query, today); cache != nil {
+	if cache, isToday := loadFundRecommendationCache(code, query, today); cache != nil && !betterRecommendationCacheStale(cache, query.Dimension) {
 		return buildCachedBetterFundResult(reference, isFundWatchlisted(code), query, cache, isToday)
 	}
 	for _, fallbackQuery := range betterFundCacheFallbackProfiles(query) {
-		if cache, isToday := loadFundRecommendationCache(code, fallbackQuery, today); cache != nil {
+		if cache, isToday := loadFundRecommendationCache(code, fallbackQuery, today); cache != nil && !betterRecommendationCacheStale(cache, fallbackQuery.Dimension) {
 			return buildCachedBetterFundResult(reference, isFundWatchlisted(code), query, cache, isToday)
 		}
 	}
@@ -2269,7 +2299,7 @@ func (s *Service) CompareFunds(query FundCompareQuery) *FundCompareResult {
 			api.CrawlFundBasic(code)
 			basic, err = dbQueryFundBasic(code)
 		}
-		if err == nil && !isSameTradingDayString(basic.ScreenUpdatedAt, now) {
+		if err == nil && (!isSameTradingDayString(basic.ScreenUpdatedAt, now) || basic.MaxDrawdown1 == nil) {
 			s.refreshFundScreeningMetrics(code)
 		}
 	}
@@ -2756,28 +2786,92 @@ func countBetterFundUniverse(reference data.FundBasic, refCategory string, exact
 	return int(count)
 }
 
+func parseFundEstablishmentDate(value string, location *time.Location) (time.Time, bool) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return time.Time{}, false
+	}
+	if location == nil {
+		location = time.Local
+	}
+	layouts := []string{"2006-01-02", "2006/01/02", "2006.01.02"}
+	for _, layout := range layouts {
+		parsed, err := time.ParseInLocation(layout, text, location)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func fundHasHistoryForWindow(basic data.FundBasic, today time.Time, months int) bool {
+	if months <= 0 {
+		return true
+	}
+	established, ok := parseFundEstablishmentDate(basic.Establishment, today.Location())
+	if !ok {
+		return true
+	}
+	return !established.After(today.AddDate(0, -months, 0))
+}
+
+func isAlmostZeroMetric(value *float64) bool {
+	if value == nil {
+		return false
+	}
+	return math.Abs(*value) < 1e-9
+}
+
+func allowsMissingSharpeForFlatFund(basic data.FundBasic) bool {
+	return basic.Sharpe12 == nil &&
+		isAlmostZeroMetric(basic.NetGrowth3) &&
+		isAlmostZeroMetric(basic.NetGrowth6) &&
+		isAlmostZeroMetric(basic.NetGrowth12) &&
+		isAlmostZeroMetric(basic.MaxDrawdown3) &&
+		isAlmostZeroMetric(basic.MaxDrawdown6) &&
+		isAlmostZeroMetric(basic.MaxDrawdown12)
+}
+
+func allowsMissingCalmarForZeroDrawdown(basic data.FundBasic) bool {
+	return basic.Calmar12 == nil && isAlmostZeroMetric(basic.MaxDrawdown12)
+}
+
 func shouldRefreshBetterFundCandidate(basic data.FundBasic, today time.Time) bool {
 	if !isSameTradingDayString(basic.ScreenUpdatedAt, today) {
 		return true
 	}
-	return basic.NetGrowth3 == nil ||
-		basic.NetGrowth6 == nil ||
-		basic.NetGrowth12 == nil ||
-		(fundSupportsSubTypeFilter(basic) && betterFundSubTypeKey(basic) == "") ||
-		basic.MaxDrawdown3 == nil ||
-		basic.MaxDrawdown6 == nil ||
-		basic.MaxDrawdown12 == nil ||
-		basic.Sharpe12 == nil ||
-		basic.Calmar12 == nil ||
-		basic.StageRank1M <= 0 ||
-		basic.StageRank1MTotal <= 0 ||
-		basic.StageRank3M <= 0 ||
-		basic.StageRank3MTotal <= 0 ||
-		basic.StageRank6M <= 0 ||
-		basic.StageRank6MTotal <= 0 ||
-		basic.StageRank12M <= 0 ||
-		basic.StageRank12MTotal <= 0 ||
-		basic.RedeemFeeFreeDays <= 0
+	require1M := fundHasHistoryForWindow(basic, today, 1)
+	require3M := fundHasHistoryForWindow(basic, today, 3)
+	require6M := fundHasHistoryForWindow(basic, today, 6)
+	require12M := fundHasHistoryForWindow(basic, today, 12)
+
+	if fundSupportsSubTypeFilter(basic) && betterFundSubTypeKey(basic) == "" {
+		return true
+	}
+	if basic.RedeemFeeFreeDays <= 0 {
+		return true
+	}
+	if require1M && (basic.StageRank1M <= 0 || basic.StageRank1MTotal <= 0) {
+		return true
+	}
+	if require3M && (basic.NetGrowth3 == nil || basic.MaxDrawdown3 == nil || basic.StageRank3M <= 0 || basic.StageRank3MTotal <= 0) {
+		return true
+	}
+	if require6M && (basic.NetGrowth6 == nil || basic.MaxDrawdown6 == nil || basic.StageRank6M <= 0 || basic.StageRank6MTotal <= 0) {
+		return true
+	}
+	if require12M {
+		if basic.NetGrowth12 == nil || basic.MaxDrawdown12 == nil || basic.StageRank12M <= 0 || basic.StageRank12MTotal <= 0 {
+			return true
+		}
+		if basic.Sharpe12 == nil && !allowsMissingSharpeForFlatFund(basic) {
+			return true
+		}
+		if basic.Calmar12 == nil && !allowsMissingCalmarForZeroDrawdown(basic) {
+			return true
+		}
+	}
+	return false
 }
 
 func isUsableBetterFundCandidate(basic data.FundBasic) bool {
@@ -3032,35 +3126,40 @@ func betterMetricSpecsForDimension(dimension string) []betterMetricSpec {
 
 func betterMetricSpecsForDimensionV2(dimension string) []betterMetricSpec {
 	specs := []betterMetricSpec{
-		{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 0.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
-		{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 1.00, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
-		{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 1.10, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
-		{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 0.65, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
-		{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
-		{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.15, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
-		{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.85, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
-		{Key: "calmar12", Label: "Calmar", Better: "higher", Weight: 0.75, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Calmar12 }},
+		{Key: "growth1", Label: "近1月收益", Better: "higher", Weight: 0.90, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth1 }},
+		{Key: "drawdown1", Label: "近1月最大回撤", Better: "lower", Weight: 0.85, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown1 }},
+		{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 1.20, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+		{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 1.10, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
+		{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+		{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 0.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+		{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+		{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.65, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+		{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.65, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+		{Key: "calmar12", Label: "Calmar", Better: "higher", Weight: 0.60, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Calmar12 }},
 	}
 
 	switch normalizeBetterFundDimension(dimension) {
 	case "lower_drawdown":
 		return []betterMetricSpec{
-			{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
-			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 1.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
-			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 1.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
-			{Key: "volatility12", Label: "近1年波动", Better: "lower", Weight: 0.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.Volatility12 }},
-			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.45, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
-			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 0.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+			{Key: "drawdown1", Label: "近1月最大回撤", Better: "lower", Weight: 1.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown1 }},
+			{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 1.40, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
+			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 1.05, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.80, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
+			{Key: "volatility12", Label: "近1年波动", Better: "lower", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.Volatility12 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.40, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+			{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 0.35, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 0.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
 		}
 	case "higher_return":
 		return []betterMetricSpec{
-			{Key: "growth1", Label: "近1月收益", Better: "higher", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth1 }},
-			{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
-			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 1.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
-			{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 1.20, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
-			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.30, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
-			{Key: "drawdown12", Label: "近1年最大回撤", Better: "lower", Weight: 0.30, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown12 }},
-			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.45, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
+			{Key: "growth1", Label: "近1月收益", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth1 }},
+			{Key: "growth3", Label: "近3月收益", Better: "higher", Weight: 1.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth3 }},
+			{Key: "growth6", Label: "近6月收益", Better: "higher", Weight: 0.95, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth6 }},
+			{Key: "growth12", Label: "近1年收益", Better: "higher", Weight: 0.75, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.NetGrowth12 }},
+			{Key: "drawdown1", Label: "近1月最大回撤", Better: "lower", Weight: 0.45, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown1 }},
+			{Key: "drawdown3", Label: "近3月最大回撤", Better: "lower", Weight: 0.55, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown3 }},
+			{Key: "drawdown6", Label: "近6月最大回撤", Better: "lower", Weight: 0.25, Format: "percent", ValueOf: func(item data.FundBasic) *float64 { return item.MaxDrawdown6 }},
+			{Key: "sharpe12", Label: "近1年夏普", Better: "higher", Weight: 0.35, Format: "ratio", ValueOf: func(item data.FundBasic) *float64 { return item.Sharpe12 }},
 		}
 	default:
 		return specs
@@ -3279,11 +3378,11 @@ func betterCategoryLabel(category string) string {
 func betterSortLabel(dimension string) string {
 	switch normalizeBetterFundDimension(dimension) {
 	case "lower_drawdown":
-		return "按风险得分排序：回撤、波动、夏普，再参考近3月和近6月收益"
+		return "按风险得分排序：近1月、近3月回撤权重更高，再参考近6月回撤、波动和收益"
 	case "higher_return":
-		return "按收益得分排序：近1月、近3月、近6月、近1年收益优先，辅以夏普和回撤"
+		return "按收益得分排序：近1月、近3月收益权重更高，再参考近6月、近1年收益与回撤"
 	default:
-		return "按综合得分排序：近3月、近6月、近1年收益联动回撤、夏普和 Calmar"
+		return "按综合得分排序：近期1-3个月收益与回撤权重更高，兼顾6月、1年、夏普和 Calmar"
 	}
 }
 
@@ -3326,7 +3425,7 @@ func isReturnBetterMetric(key string) bool {
 
 func isRiskBetterMetric(key string) bool {
 	switch key {
-	case "drawdown3", "drawdown6", "drawdown12", "volatility12", "sharpe12", "calmar12":
+	case "drawdown1", "drawdown3", "drawdown6", "drawdown12", "volatility12", "sharpe12", "calmar12":
 		return true
 	default:
 		return false
@@ -3443,6 +3542,9 @@ func (s *Service) refreshFundScreeningMetrics(code string) bool {
 
 	if trend, _, _, err := api.GetFundTrend(code); err == nil {
 		riskSnapshot := calcFundRiskSnapshot(trend, time.Now())
+		if riskSnapshot.MaxDrawdown1 != nil {
+			updates["max_drawdown1"] = riskSnapshot.MaxDrawdown1
+		}
 		if riskSnapshot.MaxDrawdown3 != nil {
 			updates["max_drawdown3"] = riskSnapshot.MaxDrawdown3
 		}
@@ -3597,6 +3699,7 @@ func (s *Service) buildFundHoldingView(h Holding) FundHoldingView {
 	view.FundManager = followed.FundBasic.Manager
 	view.FundRating = followed.FundBasic.Rating
 	view.FundScale = followed.FundBasic.Scale
+	view.TrackingTarget = strings.TrimSpace(followed.FundBasic.TrackingTarget)
 	view.NetUnitValue = followed.NetUnitValue
 	view.NetUnitValueDate = followed.NetUnitValueDate
 	view.NetEstimatedUnit = followed.NetEstimatedUnit
@@ -3930,6 +4033,7 @@ func buildFundScreenerItem(basic data.FundBasic, watchlist bool) FundScreenerIte
 		NetGrowth3:        basic.NetGrowth3,
 		NetGrowth6:        basic.NetGrowth6,
 		NetGrowth12:       basic.NetGrowth12,
+		MaxDrawdown1:      basic.MaxDrawdown1,
 		MaxDrawdown3:      basic.MaxDrawdown3,
 		MaxDrawdown6:      basic.MaxDrawdown6,
 		MaxDrawdown12:     basic.MaxDrawdown12,
@@ -3991,7 +4095,7 @@ func hydrateBetterCandidatePreferences(candidates []BetterFundCandidate) {
 
 	var basics []data.FundBasic
 	if err := db.Dao.Select(
-		"code, redeem_fee_free_days, max_drawdown3, max_drawdown6, max_drawdown12, "+
+		"code, redeem_fee_free_days, max_drawdown1, max_drawdown3, max_drawdown6, max_drawdown12, "+
 			"stage_rank1_m, stage_rank1_m_total, stage_rank3_m, stage_rank3_m_total, "+
 			"stage_rank6_m, stage_rank6_m_total, stage_rank12_m, stage_rank12_m_total",
 	).Where("code IN ?", codes).Find(&basics).Error; err != nil {
@@ -4009,6 +4113,9 @@ func hydrateBetterCandidatePreferences(candidates []BetterFundCandidate) {
 		}
 		if candidates[index].RedeemFeeFreeDays <= 0 {
 			candidates[index].RedeemFeeFreeDays = basic.RedeemFeeFreeDays
+		}
+		if candidates[index].MaxDrawdown1 == nil {
+			candidates[index].MaxDrawdown1 = cloneFloat(basic.MaxDrawdown1)
 		}
 		if candidates[index].MaxDrawdown3 == nil {
 			candidates[index].MaxDrawdown3 = cloneFloat(basic.MaxDrawdown3)
@@ -4162,6 +4269,7 @@ func calcFundMaxDrawdown(points []data.FundTrendPoint, since time.Time) *float64
 
 func calcFundRiskSnapshot(points []data.FundTrendPoint, now time.Time) fundRiskSnapshot {
 	snapshot := fundRiskSnapshot{
+		MaxDrawdown1:  calcFundMaxDrawdown(points, now.AddDate(0, -1, 0)),
 		MaxDrawdown3:  calcFundMaxDrawdown(points, now.AddDate(0, -3, 0)),
 		MaxDrawdown6:  calcFundMaxDrawdown(points, now.AddDate(0, -6, 0)),
 		MaxDrawdown12: calcFundMaxDrawdown(points, now.AddDate(-1, 0, 0)),

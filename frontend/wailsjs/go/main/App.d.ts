@@ -20,11 +20,11 @@ export function AddStockGroup(arg1:number,arg2:string):Promise<string>;
 
 export function AddTransaction(arg1:portfolio.Transaction):Promise<portfolio.Transaction>;
 
-export function AnalyzeBetterFundsWithAI(arg1:portfolio.BetterFundQuery,arg2:number,arg3:number):Promise<Record<string, any>>;
+export function AnalyzeBetterFundsWithAI(arg1:portfolio.BetterFundQuery,arg2:number,arg3:number,arg4:number):Promise<Record<string, any>>;
 
-export function AnalyzeFundCollectionWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
+export function AnalyzeFundCollectionWithAI(arg1:string,arg2:string,arg3:Array<string>,arg4:number,arg5:number):Promise<Record<string, any>>;
 
-export function AnalyzeFundWithAI(arg1:string,arg2:number):Promise<Record<string, any>>;
+export function AnalyzeFundWithAI(arg1:string,arg2:number,arg3:number):Promise<Record<string, any>>;
 
 export function AnalyzeQuantLinkageWithAI(arg1:quant.LinkageAIRequest,arg2:number):Promise<Record<string, any>>;
 
@@ -208,7 +208,11 @@ export function GetIndustryRank(arg1:string,arg2:number):Promise<Array<any>>;
 
 export function GetLatestHouseholdAIAnalysis():Promise<asset.HouseholdAIAnalysis>;
 
+export function GetLatestPortfolioExpectationAIAnalysis():Promise<portfolio.PortfolioExpectationAIAnalysis>;
+
 export function GetMoneyRankSina(arg1:string):Promise<Array<Record<string, any>>>;
+
+export function GetPortfolioExpectationSummary():Promise<portfolio.PortfolioExpectationSummary>;
 
 export function GetPortfolioSummary():Promise<portfolio.PortfolioSummary>;
 
@@ -285,6 +289,8 @@ export function RemoveStockGroup(arg1:string,arg2:string,arg3:number):Promise<st
 export function RenameFundWatchGroup(arg1:string,arg2:string):Promise<string>;
 
 export function RunHouseholdAIAnalysis(arg1:string,arg2:number,arg3:number,arg4:string):Promise<Record<string, any>>;
+
+export function RunPortfolioExpectationAIAnalysis(arg1:number,arg2:number,arg3:string):Promise<Record<string, any>>;
 
 export function SaveAIResponseResult(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number):Promise<void>;
 

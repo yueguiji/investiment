@@ -105,6 +105,7 @@ type FundHoldingView struct {
 	FundManager      string   `json:"fundManager"`
 	FundRating       string   `json:"fundRating"`
 	FundScale        string   `json:"fundScale"`
+	TrackingTarget   string   `json:"trackingTarget"`
 	Category         string   `json:"category"`
 	CategoryLabel    string   `json:"categoryLabel"`
 	RiskLevel        string   `json:"riskLevel"`
@@ -200,6 +201,7 @@ type FundScreenerItem struct {
 	NetGrowth3        *float64 `json:"netGrowth3"`
 	NetGrowth6        *float64 `json:"netGrowth6"`
 	NetGrowth12       *float64 `json:"netGrowth12"`
+	MaxDrawdown1      *float64 `json:"maxDrawdown1"`
 	MaxDrawdown3      *float64 `json:"maxDrawdown3"`
 	MaxDrawdown6      *float64 `json:"maxDrawdown6"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`

@@ -109,6 +109,7 @@ type FundBasic struct {
 	NetGrowthYTD      *float64 `json:"netGrowthYTD"`
 	NetGrowthAll      *float64 `json:"netGrowthAll"`
 	NetGrowth7        *float64 `json:"netGrowth7"`
+	MaxDrawdown1      *float64 `json:"maxDrawdown1"`
 	MaxDrawdown3      *float64 `json:"maxDrawdown3"`
 	MaxDrawdown6      *float64 `json:"maxDrawdown6"`
 	MaxDrawdown12     *float64 `json:"maxDrawdown12"`

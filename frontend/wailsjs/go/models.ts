@@ -834,6 +834,8 @@ export namespace asset {
 	    monthlyHousingLoanDeduction: number;
 	    monthlyElderlyCareDeduction: number;
 	    monthlyOtherSpecialDeduction: number;
+	    targetAnnualReturnRate: number;
+	    annualUntrackedProfit: number;
 	    notes: string;
 	
 	    static createFrom(source: any = {}) {
@@ -863,6 +865,8 @@ export namespace asset {
 	        this.monthlyHousingLoanDeduction = source["monthlyHousingLoanDeduction"];
 	        this.monthlyElderlyCareDeduction = source["monthlyElderlyCareDeduction"];
 	        this.monthlyOtherSpecialDeduction = source["monthlyOtherSpecialDeduction"];
+	        this.targetAnnualReturnRate = source["targetAnnualReturnRate"];
+	        this.annualUntrackedProfit = source["annualUntrackedProfit"];
 	        this.notes = source["notes"];
 	    }
 	
@@ -1191,6 +1195,7 @@ export namespace data {
 	    netGrowthYTD?: number;
 	    netGrowthAll?: number;
 	    netGrowth7?: number;
+	    maxDrawdown1?: number;
 	    maxDrawdown3?: number;
 	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
@@ -1245,6 +1250,7 @@ export namespace data {
 	        this.netGrowthYTD = source["netGrowthYTD"];
 	        this.netGrowthAll = source["netGrowthAll"];
 	        this.netGrowth7 = source["netGrowth7"];
+	        this.maxDrawdown1 = source["maxDrawdown1"];
 	        this.maxDrawdown3 = source["maxDrawdown3"];
 	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
@@ -2687,6 +2693,7 @@ export namespace portfolio {
 	    netGrowth3?: number;
 	    netGrowth6?: number;
 	    netGrowth12?: number;
+	    maxDrawdown1?: number;
 	    maxDrawdown3?: number;
 	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
@@ -2737,6 +2744,7 @@ export namespace portfolio {
 	        this.netGrowth3 = source["netGrowth3"];
 	        this.netGrowth6 = source["netGrowth6"];
 	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown1 = source["maxDrawdown1"];
 	        this.maxDrawdown3 = source["maxDrawdown3"];
 	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
@@ -2880,6 +2888,7 @@ export namespace portfolio {
 	    netGrowth3?: number;
 	    netGrowth6?: number;
 	    netGrowth12?: number;
+	    maxDrawdown1?: number;
 	    maxDrawdown3?: number;
 	    maxDrawdown6?: number;
 	    maxDrawdown12?: number;
@@ -2923,6 +2932,7 @@ export namespace portfolio {
 	        this.netGrowth3 = source["netGrowth3"];
 	        this.netGrowth6 = source["netGrowth6"];
 	        this.netGrowth12 = source["netGrowth12"];
+	        this.maxDrawdown1 = source["maxDrawdown1"];
 	        this.maxDrawdown3 = source["maxDrawdown3"];
 	        this.maxDrawdown6 = source["maxDrawdown6"];
 	        this.maxDrawdown12 = source["maxDrawdown12"];
@@ -3098,6 +3108,7 @@ export namespace portfolio {
 	    fundManager: string;
 	    fundRating: string;
 	    fundScale: string;
+	    trackingTarget: string;
 	    category: string;
 	    categoryLabel: string;
 	    riskLevel: string;
@@ -3149,6 +3160,7 @@ export namespace portfolio {
 	        this.fundManager = source["fundManager"];
 	        this.fundRating = source["fundRating"];
 	        this.fundScale = source["fundScale"];
+	        this.trackingTarget = source["trackingTarget"];
 	        this.category = source["category"];
 	        this.categoryLabel = source["categoryLabel"];
 	        this.riskLevel = source["riskLevel"];
@@ -3476,6 +3488,7 @@ export namespace portfolio {
 	    fundManager: string;
 	    fundRating: string;
 	    fundScale: string;
+	    trackingTarget: string;
 	    category: string;
 	    categoryLabel: string;
 	    riskLevel: string;
@@ -3535,6 +3548,7 @@ export namespace portfolio {
 	        this.fundManager = source["fundManager"];
 	        this.fundRating = source["fundRating"];
 	        this.fundScale = source["fundScale"];
+	        this.trackingTarget = source["trackingTarget"];
 	        this.category = source["category"];
 	        this.categoryLabel = source["categoryLabel"];
 	        this.riskLevel = source["riskLevel"];
@@ -3708,6 +3722,253 @@ export namespace portfolio {
 	
 	
 	
+	export class PortfolioExpectationAIAnalysis {
+	    ID: number;
+	    // Go type: time
+	    CreatedAt: any;
+	    // Go type: time
+	    UpdatedAt: any;
+	    // Go type: gorm
+	    DeletedAt: any;
+	    triggerSource: string;
+	    aiConfigId: number;
+	    promptTemplateId: number;
+	    modelName: string;
+	    status: string;
+	    prompt: string;
+	    inputPayload: string;
+	    analysisMarkdown: string;
+	    errorMessage: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PortfolioExpectationAIAnalysis(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
+	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
+	        this.DeletedAt = this.convertValues(source["DeletedAt"], null);
+	        this.triggerSource = source["triggerSource"];
+	        this.aiConfigId = source["aiConfigId"];
+	        this.promptTemplateId = source["promptTemplateId"];
+	        this.modelName = source["modelName"];
+	        this.status = source["status"];
+	        this.prompt = source["prompt"];
+	        this.inputPayload = source["inputPayload"];
+	        this.analysisMarkdown = source["analysisMarkdown"];
+	        this.errorMessage = source["errorMessage"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PortfolioExpectationBucket {
+	    key: string;
+	    label: string;
+	    value: number;
+	    weight: number;
+	    estimatedAnnualReturnRate: number;
+	    estimatedAnnualProfit: number;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PortfolioExpectationBucket(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.value = source["value"];
+	        this.weight = source["weight"];
+	        this.estimatedAnnualReturnRate = source["estimatedAnnualReturnRate"];
+	        this.estimatedAnnualProfit = source["estimatedAnnualProfit"];
+	        this.count = source["count"];
+	    }
+	}
+	export class PortfolioExpectationItem {
+	    code: string;
+	    name: string;
+	    holdingType: string;
+	    category: string;
+	    categoryLabel: string;
+	    trackingTarget: string;
+	    bucket: string;
+	    bucketLabel: string;
+	    brokerName: string;
+	    accountTag: string;
+	    totalValue: number;
+	    totalCost: number;
+	    currentProfit: number;
+	    currentProfitRate: number;
+	    estimatedAnnualReturnRate: number;
+	    estimatedAnnualProfit: number;
+	    weightInPortfolio: number;
+	    daysHeld: number;
+	    basisLabel: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PortfolioExpectationItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.holdingType = source["holdingType"];
+	        this.category = source["category"];
+	        this.categoryLabel = source["categoryLabel"];
+	        this.trackingTarget = source["trackingTarget"];
+	        this.bucket = source["bucket"];
+	        this.bucketLabel = source["bucketLabel"];
+	        this.brokerName = source["brokerName"];
+	        this.accountTag = source["accountTag"];
+	        this.totalValue = source["totalValue"];
+	        this.totalCost = source["totalCost"];
+	        this.currentProfit = source["currentProfit"];
+	        this.currentProfitRate = source["currentProfitRate"];
+	        this.estimatedAnnualReturnRate = source["estimatedAnnualReturnRate"];
+	        this.estimatedAnnualProfit = source["estimatedAnnualProfit"];
+	        this.weightInPortfolio = source["weightInPortfolio"];
+	        this.daysHeld = source["daysHeld"];
+	        this.basisLabel = source["basisLabel"];
+	    }
+	}
+	export class PortfolioExpectationSummary {
+	    generatedAt: string;
+	    householdLiquidAssets: number;
+	    targetAnnualReturnRate: number;
+	    annualUntrackedProfit: number;
+	    targetAnnualProfit: number;
+	    targetDifficultyLabel: string;
+	    yearProgressRatio: number;
+	    targetProfitToDate: number;
+	    currentPortfolioValue: number;
+	    currentTotalProfit: number;
+	    currentTotalProfitWithManual: number;
+	    currentTotalProfitRate: number;
+	    investedValue: number;
+	    investedRatioOfLiquidAssets: number;
+	    idleLiquidAssets: number;
+	    fundValue: number;
+	    stockValue: number;
+	    fundCount: number;
+	    stockCount: number;
+	    estimatedFundAnnualProfit: number;
+	    estimatedStockAnnualProfit: number;
+	    estimatedPortfolioAnnualProfit: number;
+	    combinedAnnualProfitProjection: number;
+	    estimatedHoldingsAnnualReturnRate: number;
+	    estimatedLiquidAnnualReturnRate: number;
+	    combinedLiquidAnnualReturnRate: number;
+	    projectedCompletionRatio: number;
+	    annualGap: number;
+	    toDateGap: number;
+	    requiredReturnOnInvestedCapital: number;
+	    requiredReturnOnIdleLiquidAssets: number;
+	    conservativeValue: number;
+	    conservativeRatio: number;
+	    conservativeExpectedReturnRate: number;
+	    growthValue: number;
+	    growthRatio: number;
+	    growthExpectedReturnRate: number;
+	    suggestedFixedIncomeMaxRatio: number;
+	    suggestedFixedIncomeMaxAmount: number;
+	    suggestedGrowthMinAmount: number;
+	    buckets: PortfolioExpectationBucket[];
+	    topDrivers: PortfolioExpectationItem[];
+	    bottomDraggers: PortfolioExpectationItem[];
+	    items: PortfolioExpectationItem[];
+	    warnings: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PortfolioExpectationSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generatedAt = source["generatedAt"];
+	        this.householdLiquidAssets = source["householdLiquidAssets"];
+	        this.targetAnnualReturnRate = source["targetAnnualReturnRate"];
+	        this.annualUntrackedProfit = source["annualUntrackedProfit"];
+	        this.targetAnnualProfit = source["targetAnnualProfit"];
+	        this.targetDifficultyLabel = source["targetDifficultyLabel"];
+	        this.yearProgressRatio = source["yearProgressRatio"];
+	        this.targetProfitToDate = source["targetProfitToDate"];
+	        this.currentPortfolioValue = source["currentPortfolioValue"];
+	        this.currentTotalProfit = source["currentTotalProfit"];
+	        this.currentTotalProfitWithManual = source["currentTotalProfitWithManual"];
+	        this.currentTotalProfitRate = source["currentTotalProfitRate"];
+	        this.investedValue = source["investedValue"];
+	        this.investedRatioOfLiquidAssets = source["investedRatioOfLiquidAssets"];
+	        this.idleLiquidAssets = source["idleLiquidAssets"];
+	        this.fundValue = source["fundValue"];
+	        this.stockValue = source["stockValue"];
+	        this.fundCount = source["fundCount"];
+	        this.stockCount = source["stockCount"];
+	        this.estimatedFundAnnualProfit = source["estimatedFundAnnualProfit"];
+	        this.estimatedStockAnnualProfit = source["estimatedStockAnnualProfit"];
+	        this.estimatedPortfolioAnnualProfit = source["estimatedPortfolioAnnualProfit"];
+	        this.combinedAnnualProfitProjection = source["combinedAnnualProfitProjection"];
+	        this.estimatedHoldingsAnnualReturnRate = source["estimatedHoldingsAnnualReturnRate"];
+	        this.estimatedLiquidAnnualReturnRate = source["estimatedLiquidAnnualReturnRate"];
+	        this.combinedLiquidAnnualReturnRate = source["combinedLiquidAnnualReturnRate"];
+	        this.projectedCompletionRatio = source["projectedCompletionRatio"];
+	        this.annualGap = source["annualGap"];
+	        this.toDateGap = source["toDateGap"];
+	        this.requiredReturnOnInvestedCapital = source["requiredReturnOnInvestedCapital"];
+	        this.requiredReturnOnIdleLiquidAssets = source["requiredReturnOnIdleLiquidAssets"];
+	        this.conservativeValue = source["conservativeValue"];
+	        this.conservativeRatio = source["conservativeRatio"];
+	        this.conservativeExpectedReturnRate = source["conservativeExpectedReturnRate"];
+	        this.growthValue = source["growthValue"];
+	        this.growthRatio = source["growthRatio"];
+	        this.growthExpectedReturnRate = source["growthExpectedReturnRate"];
+	        this.suggestedFixedIncomeMaxRatio = source["suggestedFixedIncomeMaxRatio"];
+	        this.suggestedFixedIncomeMaxAmount = source["suggestedFixedIncomeMaxAmount"];
+	        this.suggestedGrowthMinAmount = source["suggestedGrowthMinAmount"];
+	        this.buckets = this.convertValues(source["buckets"], PortfolioExpectationBucket);
+	        this.topDrivers = this.convertValues(source["topDrivers"], PortfolioExpectationItem);
+	        this.bottomDraggers = this.convertValues(source["bottomDraggers"], PortfolioExpectationItem);
+	        this.items = this.convertValues(source["items"], PortfolioExpectationItem);
+	        this.warnings = source["warnings"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class ProfitSnapshot {
 	    ID: number;

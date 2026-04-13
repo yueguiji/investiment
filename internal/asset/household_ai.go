@@ -331,6 +331,8 @@ func (s *Service) GetHouseholdProfile() *HouseholdProfile {
 			MonthlyHousingLoanDeduction:          0,
 			MonthlyElderlyCareDeduction:          0,
 			MonthlyOtherSpecialDeduction:         0,
+			TargetAnnualReturnRate:               0,
+			AnnualUntrackedProfit:                0,
 			Notes:                                "",
 		}
 	}
@@ -373,6 +375,18 @@ func (s *Service) UpsertHouseholdProfile(item HouseholdProfile) *HouseholdProfil
 	}
 	if item.AnnualHouseholdSpend <= 0 && item.MonthlyHouseholdSpend > 0 {
 		item.AnnualHouseholdSpend = roundTo(item.MonthlyHouseholdSpend*12, 2)
+	}
+	if item.TargetAnnualReturnRate < 0 {
+		item.TargetAnnualReturnRate = 0
+	}
+	if item.TargetAnnualReturnRate > 100 {
+		item.TargetAnnualReturnRate = 100
+	}
+	if item.AnnualUntrackedProfit < -1000000000 {
+		item.AnnualUntrackedProfit = -1000000000
+	}
+	if item.AnnualUntrackedProfit > 1000000000 {
+		item.AnnualUntrackedProfit = 1000000000
 	}
 	if err := db.Dao.Save(&item).Error; err != nil {
 		logger.SugaredLogger.Errorf("upsert household profile failed: %v", err)

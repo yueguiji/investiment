@@ -8,13 +8,20 @@
   >
     <n-space vertical size="large">
       <div class="compare-summary">
-        <n-text depth="3">
-          支持 1-10 只基金横向看近期核心表现。当前已选 {{ codes.length }} 只，
-          更新时间：{{ result?.refreshedAt || '-' }}
-        </n-text>
-        <n-text v-if="result?.missingCodes?.length" type="warning">
-          以下基金暂时没有拿到数据：{{ result.missingCodes.join('、') }}
-        </n-text>
+        <div class="compare-summary-head">
+          <div class="compare-summary-text">
+            <n-text depth="3">
+              支持 1-10 只基金横向看近期核心表现。当前已选 {{ codes.length }} 只，
+              更新时间：{{ result?.refreshedAt || '-' }}
+            </n-text>
+            <n-text v-if="result?.missingCodes?.length" type="warning">
+              以下基金暂时没有拿到数据：{{ result.missingCodes.join('、') }}
+            </n-text>
+          </div>
+          <n-button :disabled="codes.length < 2" @click="showSelectionAI = true">
+            AI分析勾选基金
+          </n-button>
+        </div>
       </div>
 
       <n-spin :show="loading">
@@ -57,6 +64,14 @@
         </div>
       </n-spin>
     </n-space>
+
+    <FundAIAnalysisModal
+      v-model:show="showSelectionAI"
+      mode="selection"
+      :fund-codes="codes"
+      :scope-label="tabLabel"
+      :title="compareAITitle"
+    />
   </n-modal>
 </template>
 
@@ -64,10 +79,12 @@
 import { computed, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import { OpenURL } from '../../../../wailsjs/go/main/App'
+import FundAIAnalysisModal from '../../portfolio/components/FundAIAnalysisModal.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
-  codes: { type: Array, default: () => [] }
+  codes: { type: Array, default: () => [] },
+  tabLabel: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update:show'])
@@ -75,13 +92,20 @@ const emit = defineEmits(['update:show'])
 const message = useMessage()
 const loading = ref(false)
 const result = ref(null)
+const showSelectionAI = ref(false)
 
 const items = computed(() => result.value?.items || [])
+const compareAITitle = computed(() => {
+  const label = String(props.tabLabel || '').trim()
+  return label ? `${label} · 勾选基金 AI 对比` : '勾选基金 AI 对比'
+})
 
 const metricRows = [
   { key: 'netGrowth7', label: '近7天', type: 'percent', better: 'higher' },
   { key: 'netGrowth1', label: '近1月', type: 'percent', better: 'higher' },
+  { key: 'maxDrawdown1', label: '近1月最大回撤', type: 'percent', better: 'lower' },
   { key: 'netGrowth3', label: '近3月', type: 'percent', better: 'higher' },
+  { key: 'maxDrawdown3', label: '近3月最大回撤', type: 'percent', better: 'lower' },
   { key: 'netGrowth6', label: '近6月', type: 'percent', better: 'higher' },
   { key: 'netGrowth12', label: '近1年', type: 'percent', better: 'higher' },
   { key: 'maxDrawdown12', label: '近1年最大回撤', type: 'percent', better: 'lower' },
@@ -99,6 +123,15 @@ watch(
     await loadCompare()
   },
   { deep: true }
+)
+
+watch(
+  () => props.show,
+  (show) => {
+    if (!show) {
+      showSelectionAI.value = false
+    }
+  }
 )
 
 async function loadCompare() {
@@ -160,6 +193,20 @@ function openFund(code) {
 
 <style scoped>
 .compare-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.compare-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.compare-summary-text {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -231,5 +278,12 @@ function openFund(code) {
   background: rgba(20, 184, 166, 0.12);
   color: #6ee7d8;
   font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .compare-summary-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

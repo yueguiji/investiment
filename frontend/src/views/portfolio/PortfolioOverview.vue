@@ -22,6 +22,8 @@
       </div>
     </div>
 
+    <PortfolioExpectationPanel :refresh-key="expectationRefreshKey" />
+
     <div class="content-grid">
       <div class="panel-card">
         <div class="panel-head">
@@ -155,6 +157,7 @@
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { NButton, NTag, useMessage } from 'naive-ui'
 import FundInsightDrawer from './components/FundInsightDrawer.vue'
+import PortfolioExpectationPanel from './components/PortfolioExpectationPanel.vue'
 
 const message = useMessage()
 
@@ -164,6 +167,7 @@ const saving = ref(false)
 const refreshing = ref(false)
 const lookupTimer = ref(null)
 const activeFund = ref(null)
+const expectationRefreshKey = ref(0)
 const dashboard = ref({
   summary: {},
   positions: [],
@@ -432,6 +436,7 @@ async function loadDashboard() {
   const result = await window.go.main.App.GetFundPortfolioDashboard()
   if (result) {
     dashboard.value = result
+    expectationRefreshKey.value += 1
   }
 }
 
