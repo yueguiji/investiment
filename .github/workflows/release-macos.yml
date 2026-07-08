@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-and-release-macos:
     runs-on: macos-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
 
     steps:
       - name: Checkout
@@ -39,6 +41,7 @@ jobs:
 
       - name: Build macOS app
         run: |
+          node -e "console.log('NODE_OPTIONS=' + (process.env.NODE_OPTIONS || ''))"
           wails build -clean -platform darwin/universal
 
       - name: Prepare release assets
