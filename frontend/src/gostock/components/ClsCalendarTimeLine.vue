@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import {nextTick, onBeforeMount, onMounted, onUnmounted, ref} from 'vue'
 import {ClsCalendar} from "../../../wailsjs/go/main/App";
 import { addMonths, format ,parse} from 'date-fns';

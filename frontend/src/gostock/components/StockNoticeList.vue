@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import {onBeforeMount, ref} from 'vue'
 import {GetStockList, StockNotice} from "../../../wailsjs/go/main/App";
 import {BrowserOpenURL} from "../../../wailsjs/runtime";

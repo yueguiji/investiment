@@ -2,15 +2,19 @@ package data
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
 	"go-stock/backend/util"
-	"path/filepath"
-	"strings"
-	"testing"
 
 	"github.com/coocood/freecache"
+	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/random"
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/go-resty/resty/v2"
@@ -36,11 +40,13 @@ func TestGetSinaNews(t *testing.T) {
 
 func TestGlobalStockIndexes(t *testing.T) {
 	resp := NewMarketNewsApi().GlobalStockIndexes(30)
-	bytes, err := json.Marshal(resp)
-	if err != nil {
-		return
-	}
-	logger.SugaredLogger.Debugf("resp: %+v", string(bytes))
+
+	bs, _ := json.Marshal(resp)
+	logger.SugaredLogger.Debugf("JSON:\n%s", string(bs))
+
+	md := NewMarketNewsApi().GlobalStockIndexesToReadable(resp)
+
+	logger.SugaredLogger.Debugf("resp: \n%s", md)
 }
 
 func TestGetIndustryRank(t *testing.T) {
@@ -68,9 +74,6 @@ func TestGetStockMoneyTrendByDay(t *testing.T) {
 	for i, re := range res {
 		logger.SugaredLogger.Debugf("key: %+v, value: %+v", i, re)
 	}
-}
-func TestTopStocksRankingList(t *testing.T) {
-	NewMarketNewsApi().TopStocksRankingList("2025-05-19")
 }
 
 func TestLongTiger(t *testing.T) {
@@ -105,10 +108,35 @@ func TestIndustryResearchReport(t *testing.T) {
 func TestStockNotice(t *testing.T) {
 	db.Init("../../data/stock.db")
 	resp := NewMarketNewsApi().StockNotice("600584,600900")
-	for _, a := range resp {
-		logger.SugaredLogger.Debugf("value: %+v", a)
+	// 转为可表格化的结构：东方财富接口返回的 list 中每项为 map，字段名多为驼峰
+	type row struct {
+		Title      string `md:"公告标题"`
+		NoticeDate string `md:"公告日期"`
+		ColumnName string `md:"公告类型"`
 	}
+	var rows []row
+	for _, a := range resp {
+		m, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["columns"].([]any) != nil && len(m["columns"].([]any)) > 0 {
+			columns := m["columns"].([]any)[0].(map[string]any)
+			rows = append(rows, row{
+				Title:      convertor.ToString(m["title"]),
+				NoticeDate: convertor.ToString(m["notice_date"]),
+				ColumnName: convertor.ToString(columns["column_name"]),
+			})
+		} else {
+			rows = append(rows, row{
+				Title:      convertor.ToString(m["title"]),
+				NoticeDate: convertor.ToString(m["notice_date"]),
+			})
+		}
 
+	}
+	md := util.MarkdownTableWithTitle("上市公司公告", rows)
+	logger.SugaredLogger.Infof(md)
 }
 
 func TestEMDictCode(t *testing.T) {
@@ -293,4 +321,24 @@ func TestNtfy(t *testing.T) {
 	//logger.SugaredLogger.Debugf("value: %s", post.String())
 	logger.SugaredLogger.Debugf("value: %s", filepath.Base("https://go-stock.sparkmemory.top/%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A/2025/12/11/%E5%B8%82%E5%9C%BA%E8%B5%84%E8%AE%AF[%E5%B8%82%E5%9C%BA%E8%B5%84%E8%AE%AF]-(2025-12-11)AI%E5%88%86%E6%9E%90%E7%BB%93%E6%9E%9C_20251211131509.html"))
 	logger.SugaredLogger.Debugf("value: %s", strutil.After("/data/go-stock-site/docs/分析报告/2025/12/09/市场资讯[市场资讯]-(2025-12-09)AI分析结果.md", "/data/go-stock-site/docs/"))
+}
+
+func TestGetSecuritiesCompanyOpinion(t *testing.T) {
+	res := NewMarketNewsApi().GetSecuritiesCompanyOpinion("2026-03-01", "2026-03-03")
+	md := strings.Builder{}
+	for _, d := range res.Data {
+		md.WriteString(d.OpinionData + "\n")
+	}
+	logger.SugaredLogger.Debugf("%s", md.String())
+
+}
+func TestGetNewsListData(t *testing.T) {
+	db.Init("../../data/stock.db")
+	list, total := NewMarketNewsApi().GetNewsListData("", time.Now().Add(-time.Hour*24*2), 1, 2)
+	md := strings.Builder{}
+	md.WriteString("### " + "最近新闻资讯" + "（共 " + strconv.FormatInt(total, 10) + " 条）\r\n")
+	for _, d := range *list {
+		md.WriteString(d.DataTime.Format(time.DateTime) + " " + d.Content + "\r\n")
+	}
+	//logger.SugaredLogger.Infof("%s", md.String())
 }

@@ -1,7 +1,7 @@
 <script setup>
-import { h, onBeforeMount, onBeforeUnmount, onMounted, ref, reactive } from 'vue'
-import { GetStockChanges, GetConfig, GetStockChangeHistory, SaveStockChangesToHistory, GetAllStockChangesWithPaging } from "../../../wailsjs/go/main/App";
-import { NTag, NText, useMessage, useNotification } from "naive-ui";
+import {computed, h, onBeforeMount, onBeforeUnmount, onMounted, onUnmounted, ref, reactive} from 'vue'
+import {GetStockChanges, GetConfig, GetStockChangeHistory, SaveStockChangesToHistory, GetAllStockChangesWithPaging} from "../../../wailsjs/go/main/App";
+import {NButton, NTag, NText, useMessage, useNotification} from "naive-ui";
 
 const notify = useNotification()
 const message = useMessage()
@@ -23,63 +23,105 @@ const paginationReactive = reactive({
   itemCount: 0,
   keyword: "",
   range: null,
+  startTime: null,
+  endTime: null,
+  minVolume: null,
+  minAmount: null,
+  minChangeRate: null,
+  maxChangeRate: null,
+  industry: "",
+  concept: "",
   prefix({ itemCount }) {
     return `${itemCount} 条记录`
   }
 })
 
+const volumeOptions = [
+  { label: '不限', value: null },
+  { label: '>100手', value: 10000 },
+  { label: '>200手', value: 20000 },
+  { label: '>500手', value: 50000 },
+  { label: '>1000手', value: 100000 },
+  { label: '>2000手', value: 200000 },
+  { label: '>5000手', value: 500000 },
+  { label: '>10000手', value: 1000000 },
+  { label: '>20000手', value: 2000000 },
+  { label: '>50000手', value: 5000000 },
+]
+
+const amountOptions = [
+  { label: '不限', value: null },
+  { label: '>100万', value: 1000000 },
+  { label: '>500万', value: 5000000 },
+  { label: '>1000万', value: 10000000 },
+  { label: '>2000万', value: 20000000 },
+  { label: '>5000万', value: 50000000 },
+  { label: '>1亿', value: 100000000 },
+  { label: '>2亿', value: 200000000 },
+  { label: '>5亿', value: 500000000 },
+]
+
+const changeRateOptions = [
+  { label: '不限', value: null },
+  { label: '>3%', value: 3 },
+  { label: '>5%', value: 5 },
+  { label: '>7%', value: 7 },
+  { label: '>9%', value: 9 },
+  { label: '>涨停', value: 9.9 },
+]
+
 const bullishTypes = [
-  { label: '火箭发射', value: '8201' },
-  { label: '快速反弹', value: '8202' },
-  { label: '大笔买入', value: '8193' },
-  { label: '封涨停板', value: '4' },
-  { label: '打开跌停板', value: '32' },
-  { label: '有大买盘', value: '64' },
-  { label: '竞价上涨', value: '8207' },
-  { label: '高开5日线', value: '8209' },
-  { label: '向上缺口', value: '8211' },
-  { label: '60日新高', value: '8213' },
-  { label: '60日大幅上涨', value: '8215' },
-  { label: '打开涨停板', value: '16' },
+  {label: '火箭发射', value: '8201'},
+  {label: '快速反弹', value: '8202'},
+  {label: '大笔买入', value: '8193'},
+  {label: '封涨停板', value: '4'},
+  {label: '打开跌停板', value: '32'},
+  {label: '有大买盘', value: '64'},
+  {label: '竞价上涨', value: '8207'},
+  {label: '高开5日线', value: '8209'},
+  {label: '向上缺口', value: '8211'},
+  {label: '60日新高', value: '8213'},
+  {label: '60日大幅上涨', value: '8215'},
+  {label: '打开涨停板', value: '16'},
 ]
 
 const bearishTypes = [
-  { label: '加速下跌', value: '8204' },
-  { label: '高台跳水', value: '8203' },
-  { label: '大笔卖出', value: '8194' },
-  { label: '封跌停板', value: '8' },
-  { label: '有大卖盘', value: '128' },
-  { label: '竞价下跌', value: '8208' },
-  { label: '低开5日线', value: '8210' },
-  { label: '向下缺口', value: '8212' },
-  { label: '60日新低', value: '8214' },
-  { label: '60日大幅下跌', value: '8216' },
+  {label: '加速下跌', value: '8204'},
+  {label: '高台跳水', value: '8203'},
+  {label: '大笔卖出', value: '8194'},
+  {label: '封跌停板', value: '8'},
+  {label: '有大卖盘', value: '128'},
+  {label: '竞价下跌', value: '8208'},
+  {label: '低开5日线', value: '8210'},
+  {label: '向下缺口', value: '8212'},
+  {label: '60日新低', value: '8214'},
+  {label: '60日大幅下跌', value: '8216'},
 ]
 
-const allTypeValues = [...bullishTypes, ...bearishTypes].map((t) => t.value)
+const allTypeValues = [...bullishTypes, ...bearishTypes].map(t => t.value)
 const selectedTypes = ref(allTypeValues)
 
 const columnsRef = ref([
   {
     title: '日期',
     key: 'changeDate',
-    width: 100,
+    width: 120,
     render(row) {
       const date = row.changeDate || row.ChangeDate
       const time = row.changeTime || row.ChangeTime || row.time
       if (date) {
-        return h(NText, { type: 'info' }, { default: () => date + ' ' + time })
+        return h(NText, {type: 'info'}, {default: () => date + ' ' + time})
       }
-      return h(NText, { type: 'info' }, { default: () => time })
+      return h(NText, {type: 'info'}, {default: () => time})
     }
   },
   {
     title: '代码',
     key: 'code',
-    width: 100,
+    width: 80,
     render(row) {
       const code = row.stockCode || row.StockCode || row.code
-      return h(NText, { type: 'info', style: 'cursor: pointer', onClick: () => copyCode(code) }, { default: () => code })
+      return h(NText, {type: 'info', style: 'cursor: pointer', onClick: () => copyCode(code)}, {default: () => code})
     }
   },
   {
@@ -93,7 +135,7 @@ const columnsRef = ref([
   {
     title: '异动类型',
     key: 'typeName',
-    width: 120,
+    width: 90,
     render(row) {
       const typeName = row.typeName || row.TypeName
       const bullishSet = new Set(['火箭发射', '快速反弹', '大笔买入', '封涨停板', '打开跌停板', '有大买盘', '竞价上涨', '高开5日线', '向上缺口', '60日新高', '60日大幅上涨', '打开涨停板'])
@@ -105,13 +147,13 @@ const columnsRef = ref([
       } else if (bearishSet.has(typeName)) {
         tagType = 'success'
       }
-      return h(NTag, { type: tagType, size: 'small' }, { default: () => typeName })
+      return h(NTag, {type: tagType, size: 'small'}, {default: () => typeName})
     }
   },
   {
     title: '价格',
     key: 'price',
-    width: 80,
+    width: 70,
     render(row) {
       const price = row.price || row.Price
       if (price > 0) {
@@ -123,13 +165,13 @@ const columnsRef = ref([
   {
     title: '涨跌幅(%)',
     key: 'changeRate',
-    width: 100,
+    width: 85,
     render(row) {
       const changeRate = row.changeRate || row.ChangeRate
       if (changeRate !== 0) {
         const color = changeRate > 0 ? '#dc2626' : '#16a34a'
         const prefix = changeRate > 0 ? '+' : ''
-        return h('span', { style: { color, fontWeight: '500' } }, prefix + changeRate.toFixed(2) + '%')
+        return h('span', {style: {color: color, fontWeight: '500'}}, prefix + changeRate.toFixed(2) + '%')
       }
       return '-'
     }
@@ -137,7 +179,7 @@ const columnsRef = ref([
   {
     title: '成交量',
     key: 'volume',
-    width: 100,
+    width: 80,
     render(row) {
       const volume = row.volume || row.Volume
       if (volume > 0) {
@@ -156,6 +198,26 @@ const columnsRef = ref([
         return formatAmount(amount)
       }
       return '-'
+    }
+  },
+  {
+    title: '行业',
+    key: 'industry',
+    width: 80,
+    ellipsis: {
+      tooltip: true
+    },
+    render(row) {
+      return row.industry || row.Industry || '-'
+    }
+  },
+  {
+    title: '概念',
+    key: 'concept',
+    minWidth: 200,
+    render(row) {
+      const text = row.concept || row.Concept || '-'
+      return h('div', {style: 'white-space: normal; line-height: 1.4;'}, text)
     }
   },
 ])
@@ -207,10 +269,18 @@ function checkTradingTime() {
 
   if (currentTime >= morningStart && currentTime <= morningEnd) {
     isTrading.value = true
-    marketStatus.value = currentTime < 930 ? '集合竞价' : '上午交易'
+    if (currentTime < 930) {
+      marketStatus.value = '集合竞价'
+    } else {
+      marketStatus.value = '上午交易'
+    }
   } else if (currentTime >= afternoonStart && currentTime <= afternoonEnd) {
     isTrading.value = true
-    marketStatus.value = currentTime < 1300 ? '午间集合竞价' : '下午交易'
+    if (currentTime < 1300) {
+      marketStatus.value = '午间集合竞价'
+    } else {
+      marketStatus.value = '下午交易'
+    }
   } else if (currentTime > morningEnd && currentTime < afternoonStart) {
     isTrading.value = false
     marketStatus.value = '午间休市'
@@ -226,7 +296,7 @@ function checkTradingTime() {
 async function fetchRealtimeData() {
   loadingRef.value = true
   try {
-    const types = selectedTypes.value.map((t) => parseInt(t, 10))
+    const types = selectedTypes.value.map(t => parseInt(t))
     const result = await GetStockChanges(types, 0, paginationReactive.pageSize)
     if (result) {
       dataRef.value = result.data || []
@@ -250,6 +320,30 @@ async function fetchHistoryData() {
       query.startDate = formatDate(paginationReactive.range[0])
       query.endDate = formatDate(paginationReactive.range[1])
     }
+    if (paginationReactive.startTime) {
+      query.startTime = formatTime(paginationReactive.startTime)
+    }
+    if (paginationReactive.endTime) {
+      query.endTime = formatTime(paginationReactive.endTime)
+    }
+    if (paginationReactive.minVolume) {
+      query.minVolume = paginationReactive.minVolume
+    }
+    if (paginationReactive.minAmount) {
+      query.minAmount = paginationReactive.minAmount
+    }
+    if (paginationReactive.minChangeRate) {
+      query.minChangeRate = paginationReactive.minChangeRate
+    }
+    if (paginationReactive.maxChangeRate) {
+      query.maxChangeRate = paginationReactive.maxChangeRate
+    }
+    if (paginationReactive.industry.trim()) {
+      query.industry = paginationReactive.industry.trim()
+    }
+    if (paginationReactive.concept.trim()) {
+      query.concept = paginationReactive.concept.trim()
+    }
     if (paginationReactive.keyword.trim()) {
       const keyword = paginationReactive.keyword.trim()
       if (/^\d+$/.test(keyword)) {
@@ -259,7 +353,7 @@ async function fetchHistoryData() {
       }
     }
     if (selectedTypes.value.length > 0) {
-      query.changeTypes = selectedTypes.value.map((t) => parseInt(t, 10))
+      query.changeTypes = selectedTypes.value.map(t => parseInt(t))
     }
     const result = await GetStockChangeHistory(query)
     if (result) {
@@ -283,6 +377,15 @@ function formatDate(dateValue) {
   return `${year}-${month}-${day}`
 }
 
+function formatTime(timeValue) {
+  if (!timeValue) return ''
+  const date = new Date(timeValue)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${hours}:${minutes}:${seconds}`
+}
+
 async function fetchData() {
   if (viewMode.value === 'realtime') {
     await fetchRealtimeData()
@@ -292,7 +395,7 @@ async function fetchData() {
 }
 
 async function saveCurrentData() {
-  const types = selectedTypes.value.map((t) => parseInt(t, 10))
+  const types = selectedTypes.value.map(t => parseInt(t))
   const result = await SaveStockChangesToHistory(types)
   message.info(result)
 }
@@ -330,15 +433,15 @@ function toggleAutoRefresh() {
 }
 
 function selectAllBullish() {
-  const bullishValues = bullishTypes.map((t) => t.value)
-  const currentBearish = selectedTypes.value.filter((t) => bearishTypes.some((b) => b.value === t))
+  const bullishValues = bullishTypes.map(t => t.value)
+  const currentBearish = selectedTypes.value.filter(t => bearishTypes.some(b => b.value === t))
   selectedTypes.value = [...bullishValues, ...currentBearish]
   fetchData()
 }
 
 function selectAllBearish() {
-  const bearishValues = bearishTypes.map((t) => t.value)
-  const currentBullish = selectedTypes.value.filter((t) => bullishTypes.some((b) => b.value === t))
+  const bearishValues = bearishTypes.map(t => t.value)
+  const currentBullish = selectedTypes.value.filter(t => bullishTypes.some(b => b.value === t))
   selectedTypes.value = [...currentBullish, ...bearishValues]
   fetchData()
 }
@@ -407,7 +510,7 @@ async function fetchAllCurrentData() {
 }
 
 onBeforeMount(() => {
-  GetConfig().then((result) => {
+  GetConfig().then(result => {
     if (result.darkTheme) {
       document.documentElement.classList.add('dark')
     }
@@ -476,14 +579,69 @@ onBeforeUnmount(() => {
         </n-alert>
 
         <n-space v-if="viewMode === 'history'" align="center">
-          <n-input v-model:value="paginationReactive.keyword" placeholder="输入股票代码或名称" clearable style="width: 200px" @keyup="handleSearchKeyup" />
+          <n-input
+            v-model:value="paginationReactive.keyword"
+            placeholder="输入股票代码或名称"
+            clearable
+            style="width: 200px"
+            @keyup="handleSearchKeyup"
+          />
           <n-date-picker v-model:value="paginationReactive.range" type="daterange" clearable />
+          <n-time-picker
+            v-model:value="paginationReactive.startTime"
+            placeholder="开始时间"
+            clearable
+            format="HH:mm:ss"
+            style="width: 120px"
+          />
+          <n-time-picker
+            v-model:value="paginationReactive.endTime"
+            placeholder="结束时间"
+            clearable
+            format="HH:mm:ss"
+            style="width: 120px"
+          />
           <n-button type="primary" @click="handleSearch" :loading="loadingRef">
             查询
           </n-button>
           <n-button @click="fetchAllCurrentData" :loading="loadingRef">
             获取今日全部数据
           </n-button>
+        </n-space>
+        <n-space v-if="viewMode === 'history'" align="center" style="margin-top: 8px">
+          <n-select
+            v-model:value="paginationReactive.minVolume"
+            :options="volumeOptions"
+            placeholder="成交量筛选"
+            style="width: 120px"
+            clearable
+          />
+          <n-select
+            v-model:value="paginationReactive.minAmount"
+            :options="amountOptions"
+            placeholder="金额筛选"
+            style="width: 120px"
+            clearable
+          />
+          <n-select
+            v-model:value="paginationReactive.minChangeRate"
+            :options="changeRateOptions"
+            placeholder="涨跌幅筛选"
+            style="width: 120px"
+            clearable
+          />
+          <n-input
+            v-model:value="paginationReactive.industry"
+            placeholder="行业关键词"
+            clearable
+            style="width: 120px"
+          />
+          <n-input
+            v-model:value="paginationReactive.concept"
+            placeholder="概念关键词"
+            clearable
+            style="width: 120px"
+          />
         </n-space>
 
         <n-space align="center" style="margin-top: 8px">
@@ -502,7 +660,7 @@ onBeforeUnmount(() => {
             <n-space>
               <n-checkbox v-for="item in bullishTypes" :key="item.value" :value="item.value" :label="item.label">
                 <template #default>
-                  <n-text :style="{ color: selectedTypes.includes(item.value) ? '#dc2626' : undefined }">{{ item.label }}</n-text>
+                  <n-text :style="{color: selectedTypes.includes(item.value) ? '#dc2626' : undefined}">{{ item.label }}</n-text>
                 </template>
               </n-checkbox>
             </n-space>
@@ -518,7 +676,7 @@ onBeforeUnmount(() => {
             <n-space>
               <n-checkbox v-for="item in bearishTypes" :key="item.value" :value="item.value" :label="item.label">
                 <template #default>
-                  <n-text :style="{ color: selectedTypes.includes(item.value) ? '#16a34a' : undefined }">{{ item.label }}</n-text>
+                  <n-text :style="{color: selectedTypes.includes(item.value) ? '#16a34a' : undefined}">{{ item.label }}</n-text>
                 </template>
               </n-checkbox>
             </n-space>
@@ -528,17 +686,17 @@ onBeforeUnmount(() => {
     </template>
 
     <n-data-table
-      remote
-      :columns="columnsRef"
-      :data="dataRef"
-      :loading="loadingRef"
-      :pagination="viewMode === 'history' ? paginationReactive : false"
-      :bordered="false"
-      :max-height="500"
-      :scroll-x="1000"
-      striped
-      size="small"
-      @update:page="handlePageChange"
+        remote
+        :columns="columnsRef"
+        :data="dataRef"
+        :loading="loadingRef"
+        :pagination="viewMode === 'history' ? paginationReactive : false"
+        :bordered="false"
+        :max-height="500"
+        :scroll-x="1300"
+        striped
+        size="small"
+        @update:page="handlePageChange"
     />
   </n-card>
 </template>

@@ -1,5 +1,5 @@
-﻿<script setup lang="ts">
-import {onMounted, onUnmounted, ref} from "vue";
+<script setup lang="ts">
+import {onMounted, ref} from "vue";
 import {GetStockMoneyTrendByDay} from "../../../wailsjs/go/main/App";
 import * as echarts from "echarts";
 
@@ -26,7 +26,6 @@ const {code, name, darkTheme, days, chartHeight} = defineProps({
   }
 })
 const LineChartRef = ref(null);
-const chartRef = ref(null)
 
 onMounted(
     () => {
@@ -36,14 +35,7 @@ onMounted(
 const handleLine = (code, days) => {
   GetStockMoneyTrendByDay(code, days).then(result => {
     //console.log("GetStockMoneyTrendByDay", result)
-    if (!LineChartRef.value) {
-      return
-    }
-    const chart = chartRef.value ?? echarts.init(LineChartRef.value);
-    chartRef.value = chart
-    if (!result || result.length === 0) {
-      return
-    }
+    const chart = echarts.init(LineChartRef.value);
     const categoryData = [];
     const netamount_values = [];
     const r0_net_values = [];
@@ -371,13 +363,6 @@ const handleLine = (code, days) => {
     chart.setOption(option);
   })
 }
-
-onUnmounted(() => {
-  if (chartRef.value) {
-    chartRef.value.dispose()
-    chartRef.value = null
-  }
-})
 </script>
 
 <template>

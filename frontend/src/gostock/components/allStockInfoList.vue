@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { h, onBeforeMount, onMounted, ref, reactive } from 'vue'
 import {
   GetAllStockInfoList,
@@ -240,7 +240,7 @@ function loadStocks(page, pageSize) {
       industry: searchFormRef.industry,
       concept: searchFormRef.concept,
     }
-    
+
     GetAllStockInfoList(query).then((res) => {
       console.log('GetAllStockInfoList result:', res)
       if (res &&  res.list) {
@@ -342,8 +342,8 @@ function handleReset() {
         </n-grid-item>
         <n-grid-item>
           <n-form-item label="股票名称/代码" label-placement="left">
-            <n-input 
-              v-model:value="searchFormRef.securityName" 
+            <n-input
+              v-model:value="searchFormRef.securityName"
               placeholder="请输入股票名称/代码"
               clearable
             />

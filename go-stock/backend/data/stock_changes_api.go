@@ -3,7 +3,9 @@ package data
 import (
 	"encoding/json"
 	"fmt"
+	"go-stock/backend/db"
 	"go-stock/backend/logger"
+	"go-stock/backend/models"
 	"go-stock/backend/util"
 	"io"
 	"net/http"
@@ -24,6 +26,8 @@ type StockChangeItem struct {
 	Price      float64 `json:"price" md:"价格"`
 	ChangeRate float64 `json:"changeRate" md:"涨跌幅(%)"`
 	Amount     float64 `json:"amount" md:"金额"`
+	Industry   string  `json:"industry" md:"所属行业"`
+	Concept    string  `json:"concept" md:"所属概念"`
 }
 
 type StockChangesResponse struct {
@@ -45,7 +49,8 @@ type stockChangesAPIResponse struct {
 	} `json:"data"`
 }
 
-type StockChangesApi struct{}
+type StockChangesApi struct {
+}
 
 func NewStockChangesApi() *StockChangesApi {
 	return &StockChangesApi{}
@@ -77,6 +82,10 @@ var changeTypeNames = map[int]string{
 }
 
 func (a *StockChangesApi) GetStockChanges(changeTypes []int, pageIndex, pageSize int) *StockChangesResponse {
+	//if len(changeTypes) == 0 {
+	//	changeTypes = []int{8201, 8202, 8193, 4, 8204, 8203, 8194, 8}
+	//}
+
 	typeStrs := make([]string, len(changeTypes))
 	for i, t := range changeTypes {
 		typeStrs[i] = strconv.Itoa(t)
@@ -90,13 +99,15 @@ func (a *StockChangesApi) GetStockChanges(changeTypes []int, pageIndex, pageSize
 		time.Now().UnixMilli(),
 	)
 
+	//logger.SugaredLogger.Infof("请求URL: %s", url)
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		logger.SugaredLogger.Errorf("创建请求失败: %v", err)
 		return nil
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36 Edg/117.0.2045.60")
+	req.Header.Set("User-Agent", getRandomUA())
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -111,7 +122,7 @@ func (a *StockChangesApi) GetStockChanges(changeTypes []int, pageIndex, pageSize
 		return nil
 	}
 
-	jsonStr := extractStockChangesJSON(string(body))
+	jsonStr := extractJSON(string(body))
 	if jsonStr == "" {
 		logger.SugaredLogger.Error("解析JSON失败")
 		return nil
@@ -128,9 +139,16 @@ func (a *StockChangesApi) GetStockChanges(changeTypes []int, pageIndex, pageSize
 		Data:       make([]StockChangeItem, 0, len(apiResp.Data.Allstock)),
 	}
 
+	stockCodes := make([]string, 0, len(apiResp.Data.Allstock))
+	for _, item := range apiResp.Data.Allstock {
+		stockCodes = append(stockCodes, item.C)
+	}
+
+	stockInfoMap := a.getStockInfoMap(stockCodes)
+
 	for _, item := range apiResp.Data.Allstock {
 		changeItem := StockChangeItem{
-			Time:       formatStockChangeTime(item.Tm),
+			Time:       formatTime(item.Tm),
 			Code:       item.C,
 			Name:       item.N,
 			Market:     item.M,
@@ -138,10 +156,33 @@ func (a *StockChangesApi) GetStockChanges(changeTypes []int, pageIndex, pageSize
 			TypeName:   getChangeTypeName(item.T),
 		}
 
-		parseStockChangeData(item.I, &changeItem, item.T)
+		if info, ok := stockInfoMap[item.C]; ok {
+			changeItem.Industry = info.INDUSTRY
+			changeItem.Concept = info.CONCEPT
+		}
+
+		parseItemData(item.I, &changeItem, item.T)
 		result.Data = append(result.Data, changeItem)
 	}
 
+	return result
+}
+
+func (a *StockChangesApi) getStockInfoMap(stockCodes []string) map[string]models.AllStockInfo {
+	result := make(map[string]models.AllStockInfo)
+	if len(stockCodes) == 0 {
+		return result
+	}
+
+	var stockInfos []models.AllStockInfo
+	if err := db.Dao.Model(&models.AllStockInfo{}).Where("sec_uri_tycode IN ?", stockCodes).Find(&stockInfos).Error; err != nil {
+		logger.SugaredLogger.Errorf("查询股票信息失败: %v", err)
+		return result
+	}
+
+	for _, info := range stockInfos {
+		result[info.SECURITYCODE] = info
+	}
 	return result
 }
 
@@ -200,7 +241,7 @@ func (a *StockChangesApi) GetAllStockChangesWithPaging(pageSize int) *StockChang
 	}
 }
 
-func extractStockChangesJSON(jsonp string) string {
+func extractJSON(jsonp string) string {
 	re := regexp.MustCompile(`^\w+\((.*)\)$`)
 	matches := re.FindStringSubmatch(jsonp)
 	if len(matches) > 1 {
@@ -209,7 +250,7 @@ func extractStockChangesJSON(jsonp string) string {
 	return jsonp
 }
 
-func formatStockChangeTime(tm int) string {
+func formatTime(tm int) string {
 	hour := tm / 10000
 	minute := (tm % 10000) / 100
 	second := tm % 100
@@ -223,7 +264,7 @@ func getChangeTypeName(t int) string {
 	return fmt.Sprintf("类型%d", t)
 }
 
-func parseStockChangeData(data string, item *StockChangeItem, changeType int) {
+func parseItemData(data string, item *StockChangeItem, changeType int) {
 	parts := strings.Split(data, ",")
 	switch changeType {
 	case 8201, 8202, 8203, 8204, 8207, 8208, 8209, 8210:
@@ -350,4 +391,22 @@ func parseStockChangeData(data string, item *StockChangeItem, changeType int) {
 			}
 		}
 	}
+}
+
+func formatVolume(vol int64) string {
+	if vol >= 100000000 {
+		return fmt.Sprintf("%.2f亿", float64(vol)/100000000)
+	} else if vol >= 10000 {
+		return fmt.Sprintf("%.2f万", float64(vol)/10000)
+	}
+	return fmt.Sprintf("%d", vol)
+}
+
+func formatAmount(amount float64) string {
+	if amount >= 100000000 {
+		return fmt.Sprintf("%.2f亿", amount/100000000)
+	} else if amount >= 10000 {
+		return fmt.Sprintf("%.2f万", amount/10000)
+	}
+	return fmt.Sprintf("%.2f", amount)
 }

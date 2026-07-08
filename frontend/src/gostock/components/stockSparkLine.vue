@@ -1,5 +1,5 @@
-﻿<script setup>
-import {nextTick, onMounted, onUnmounted, ref, watch} from "vue";
+<script setup>
+import {nextTick, onBeforeUnmount, onMounted, ref, watchEffect} from "vue";
 import * as echarts from 'echarts';
 import {GetStockMinutePriceLineData} from "../../../wailsjs/go/main/App"; // 如果您使用多个组件，请将此样式导入放在您的主文件中
 const {idSuffix,stockCode,stockName,lastPrice,openPrice,darkTheme} = defineProps({
@@ -29,23 +29,21 @@ const {idSuffix,stockCode,stockName,lastPrice,openPrice,darkTheme} = defineProps
   },
 })
 
-const chartRef = ref(null)
+const chartRef = ref(null);
+const chart = ref(null)
+let disposed = false
 
-function getContainer() {
-  return document.getElementById('sparkLine' + stockCode + idSuffix)
-}
-
-function setChartData(chart) {
-  if (!chart || chart.isDisposed?.()) {
-    return
-  }
+function setChartData() {
+  if (!chart.value || disposed || !stockCode) return
   //console.log("setChartData")
   GetStockMinutePriceLineData(stockCode, stockName).then(result => {
-    if (!chart || chart.isDisposed?.() || !result?.priceData?.length) {
+    if (!chart.value || disposed) return
+    //console.log("GetStockMinutePriceLineData",result)
+    const priceData = Array.isArray(result?.priceData) ? result.priceData : []
+    if (priceData.length === 0) {
+      chart.value.clear()
       return
     }
-    //console.log("GetStockMinutePriceLineData",result)
-    const priceData = result.priceData
     let category = []
     let price = []
     let min = 0
@@ -127,37 +125,40 @@ function setChartData(chart) {
         }
       ]
     };
-    chart.setOption(option);
+    if (chart.value && !disposed) {
+      chart.value.setOption(option);
+    }
+  }).catch((err) => {
+    console.error('GetStockMinutePriceLineData error:', err)
   })
 }
 
-onMounted(() => {
-  nextTick(() => {
-    const container = getContainer()
-    if (!container) {
-      return
-    }
-    chartRef.value = echarts.init(container)
-    setChartData(chartRef.value)
-  })
+onMounted(async () => {
+  disposed = false
+  await nextTick()
+  if (!chartRef.value || disposed) return
+  chart.value = echarts.init(chartRef.value);
+  setChartData();
 })
 
-watch(() => [stockCode, stockName, lastPrice, openPrice], () => {
+onBeforeUnmount(() => {
+  disposed = true
+  if (chart.value) {
+    chart.value.dispose()
+    chart.value = null
+  }
+})
+
+
+watchEffect(() => {
   console.log(stockName,'lastPrice变化为:', lastPrice,lastPrice > openPrice)
-  if (chartRef.value) {
-    setChartData(chartRef.value)
-  }
+  if (!chart.value || disposed) return
+  setChartData();
 })
 
-onUnmounted(() => {
-  if (chartRef.value) {
-    chartRef.value.dispose()
-    chartRef.value = null
-  }
-})
 
 </script>
 <template>
-<div style="height: 20px;width: 100%"  :id="'sparkLine'+stockCode+idSuffix">
+<div ref="chartRef" style="height: 20px;width: 100%"  :id="'sparkLine'+stockCode+idSuffix">
 </div>
 </template>

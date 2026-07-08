@@ -3,6 +3,12 @@
     <n-page-header title="基金持仓" subtitle="优先读取本地持仓，再按需要刷新估值；支持直接编辑当前持仓金额。">
       <template #extra>
         <n-space>
+          <n-select
+            v-model:value="estimateMode"
+            :options="estimateModeOptions"
+            size="small"
+            style="width: 176px;"
+          />
           <n-button @click="showCollectionAI = true">AI 分析组合</n-button>
           <n-button :loading="refreshing" @click="handleRefresh">刷新估值</n-button>
           <n-button @click="$router.push('/portfolio/transactions')">录入持仓</n-button>
@@ -55,7 +61,7 @@
     <div class="table-card">
       <n-data-table
         :columns="columns"
-        :data="filteredRows"
+        :data="sortedRows"
         :pagination="{ pageSize: 12 }"
         :scroll-x="1780"
         striped
@@ -119,6 +125,7 @@
     <FundInsightDrawer
       v-model:show="showDetail"
       :fund="activeFund"
+      :estimate-source="estimateMode"
       @refreshed="loadData"
     />
 
@@ -139,7 +146,7 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { NButton, NTag, useMessage } from 'naive-ui'
 import FundInsightDrawer from './components/FundInsightDrawer.vue'
 import FundAIAnalysisModal from './components/FundAIAnalysisModal.vue'
@@ -155,8 +162,14 @@ const keyword = ref('')
 const categoryFilter = ref('all')
 const platformFilter = ref('all')
 const accountFilter = ref('all')
+const estimateMode = ref('eastmoney_js')
+const estimatePreferenceReady = ref(false)
 const activeFund = ref(null)
 const editingHoldingId = ref(0)
+const holdingSortState = ref({
+  key: '',
+  order: 'desc'
+})
 const dashboard = ref({
   summary: {},
   positions: [],
@@ -168,6 +181,13 @@ const dashboard = ref({
 const editForm = ref(createEmptyEditForm())
 
 const summary = computed(() => dashboard.value.summary || {})
+
+const estimateModeOptions = [
+  { label: '天天基金 JS', value: 'eastmoney_js' },
+  { label: '天天基金移动端', value: 'eastmoney_mobile' },
+  { label: '蛋卷持仓模拟', value: 'danjuan_position' },
+  { label: 'AI估值纠偏', value: 'ai_corrected' }
+]
 
 const categoryOptions = [
   { label: '全部分类', value: 'all' },
@@ -199,6 +219,19 @@ const filteredRows = computed(() => {
     const matchesAccount = accountFilter.value === 'all' || (row.accountTag || '未分组账户') === accountFilter.value
     return matchesKeyword && matchesCategory && matchesPlatform && matchesAccount
   })
+})
+
+const sortedRows = computed(() => {
+  const list = [...filteredRows.value]
+  const { key, order } = holdingSortState.value
+  if (!key) {
+    return list
+  }
+  return list.sort((left, right) => compareNullableValues(
+    getHoldingSortValue(left, key),
+    getHoldingSortValue(right, key),
+    order
+  ))
 })
 
 const columns = [
@@ -241,7 +274,7 @@ const columns = [
     render: (row) => formatUnits(row.quantity)
   },
   {
-    title: '最近1日',
+    title: () => renderSortableTitle('最近1日', 'latestDailyRate'),
     key: 'latestDailyRate',
     width: 100,
     render: (row) => {
@@ -249,9 +282,14 @@ const columns = [
       if (text === '--') {
         return h('span', { class: 'fund-meta' }, text)
       }
-      return h('span', {
-        class: latestDailyRateValue(row) >= 0 ? 'profit-text' : 'loss-text'
-      }, text)
+      return h('span', { class: 'daily-rate-cell' }, [
+        h('span', {
+          class: latestDailyRateValue(row) >= 0 ? 'profit-text' : 'loss-text'
+        }, text),
+        isLatestDailyUpdatedToday(row)
+          ? h('span', { class: 'daily-updated-mark', title: '今日已更新' }, '✓')
+          : null
+      ])
     }
   },
   {
@@ -261,42 +299,43 @@ const columns = [
     render: (row) => h('span', { class: 'fund-meta' }, latestDailyTimeText(row))
   },
   {
-    title: '今日估算',
+    title: () => renderSortableTitle('今日估算', 'todayRate'),
     key: 'todayRate',
     width: 140,
     render: (row) => {
-      if (!row.estimateUpdated) {
-        return h('span', { class: 'fund-meta' }, '休市或暂无盘中估算')
+      const display = estimateDisplayValue(row)
+      if (display.rate === null || display.rate === undefined) {
+        return h('span', { class: 'fund-meta' }, display.emptyText)
       }
-      return h('span', { class: row.todayChange >= 0 ? 'profit-text' : 'loss-text' }, `${formatSignedMoney(row.todayChange)} / ${signedPercent(row.todayRate)}%`)
+      return h('span', { class: display.change >= 0 ? 'profit-text' : 'loss-text' }, `${formatSignedMoney(display.change)} / ${signedPercent(display.rate)}%`)
     }
   },
   {
-    title: '持仓市值',
+    title: () => renderSortableTitle('持仓市值', 'totalValue'),
     key: 'totalValue',
     width: 120,
     render: (row) => formatMoney(row.totalValue)
   },
   {
-    title: '近1月',
+    title: () => renderSortableTitle('近1月', 'netGrowth1'),
     key: 'netGrowth1',
     width: 90,
     render: (row) => formatMaybePercent(row.netGrowth1)
   },
   {
-    title: '近3月',
+    title: () => renderSortableTitle('近3月', 'netGrowth3'),
     key: 'netGrowth3',
     width: 90,
     render: (row) => formatMaybePercent(row.netGrowth3)
   },
   {
-    title: '近6月',
+    title: () => renderSortableTitle('近6月', 'netGrowth6'),
     key: 'netGrowth6',
     width: 90,
     render: (row) => formatMaybePercent(row.netGrowth6)
   },
   {
-    title: '近1年',
+    title: () => renderSortableTitle('近1年', 'netGrowth12'),
     key: 'netGrowth12',
     width: 90,
     render: (row) => formatMaybePercent(row.netGrowth12)
@@ -313,6 +352,98 @@ const columns = [
     ])
   }
 ]
+
+function renderSortableTitle(label, sortKey, defaultOrder = 'desc') {
+  const active = holdingSortState.value.key === sortKey
+  const order = active ? holdingSortState.value.order : defaultOrder
+  return h(
+    'span',
+    {
+      role: 'button',
+      tabindex: 0,
+      'aria-label': `${label}排序`,
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        color: active ? '#eef5ff' : 'inherit',
+        font: 'inherit',
+        lineHeight: 1,
+        whiteSpace: 'nowrap'
+      },
+      onClick: (event) => {
+        event.stopPropagation()
+        toggleHoldingSort(sortKey)
+      },
+      onKeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggleHoldingSort(sortKey)
+        }
+      }
+    },
+    [
+      h('span', null, label),
+      h(
+        'span',
+        {
+          'aria-hidden': 'true',
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontSize: '11px',
+            color: active ? 'var(--primary-color)' : 'rgba(222, 234, 255, 0.42)'
+          }
+        },
+        order === 'asc' ? '↑' : '↓'
+      )
+    ]
+  )
+}
+
+function toggleHoldingSort(sortKey) {
+  if (holdingSortState.value.key === sortKey) {
+    holdingSortState.value.order = holdingSortState.value.order === 'desc' ? 'asc' : 'desc'
+    return
+  }
+  holdingSortState.value = {
+    key: sortKey,
+    order: 'desc'
+  }
+}
+
+function getHoldingSortValue(row, sortKey) {
+  switch (sortKey) {
+    case 'latestDailyRate':
+      return row.latestDailyRate
+    case 'todayRate':
+      return estimateDisplayValue(row).rate
+    case 'totalValue':
+      return row.totalValue
+    case 'netGrowth1':
+      return row.netGrowth1
+    case 'netGrowth3':
+      return row.netGrowth3
+    case 'netGrowth6':
+      return row.netGrowth6
+    case 'netGrowth12':
+      return row.netGrowth12
+    default:
+      return null
+  }
+}
+
+function compareNullableValues(left, right, order = 'desc') {
+  const leftMissing = left === null || left === undefined || Number.isNaN(Number(left))
+  const rightMissing = right === null || right === undefined || Number.isNaN(Number(right))
+  if (leftMissing && rightMissing) return 0
+  if (leftMissing) return 1
+  if (rightMissing) return -1
+  const diff = Number(left) - Number(right)
+  return order === 'asc' ? diff : -diff
+}
 
 function createEmptyEditForm() {
   return {
@@ -368,8 +499,30 @@ function latestDailyRateText(row) {
 }
 
 function latestDailyTimeText(row) {
-  const raw = row.latestDailyUpdatedAt || row.netUnitValueDate
+  const raw = row.estimateUpdated && row.netEstimatedTime
+    ? row.netEstimatedTime
+    : (row.latestDailyUpdatedAt || row.netUnitValueDate)
   return shortDateTime(raw)
+}
+
+function estimateDisplayValue(row) {
+  if (!row.estimateUpdated) {
+    return { change: 0, rate: null, emptyText: '休市或暂无盘中估算' }
+  }
+  return {
+    change: Number(row.todayChange || 0),
+    rate: Number(row.todayRate || 0),
+    emptyText: '休市或暂无盘中估算'
+  }
+}
+
+function isLatestDailyUpdatedToday(row) {
+  const raw = row.netUnitValueDate
+  const dateText = String(raw || '').match(/\d{4}-\d{2}-\d{2}/)?.[0]
+  if (!dateText) return false
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return dateText === today
 }
 
 function openFundDetail(row) {
@@ -453,16 +606,32 @@ async function handleDelete(row) {
 
 async function loadData() {
   if (!window.go?.main?.App?.GetFundPortfolioDashboard) return
-  const result = await window.go.main.App.GetFundPortfolioDashboard()
+  const result = window.go?.main?.App?.GetFundPortfolioDashboardByFundEstimateSource
+    ? await window.go.main.App.GetFundPortfolioDashboardByFundEstimateSource(estimateMode.value)
+    : await window.go.main.App.GetFundPortfolioDashboard()
   if (result) {
     dashboard.value = result
   }
 }
 
+async function loadEstimatePreference() {
+  try {
+    if (window.go?.main?.App?.GetFundEstimateSourcePreference) {
+      estimateMode.value = normalizeEstimateMode(await window.go.main.App.GetFundEstimateSourcePreference())
+      return
+    }
+  } catch (error) {
+    console.error(error)
+  }
+  estimateMode.value = normalizeEstimateMode(window.localStorage.getItem('fund-holding-estimate-mode'))
+}
+
 async function handleRefresh() {
   refreshing.value = true
   try {
-    if (window.go?.main?.App?.SyncPortfolioQuotes) {
+    if (window.go?.main?.App?.SyncPortfolioQuotesByFundEstimateSource) {
+      await window.go.main.App.SyncPortfolioQuotesByFundEstimateSource(estimateMode.value)
+    } else if (window.go?.main?.App?.SyncPortfolioQuotes) {
       await window.go.main.App.SyncPortfolioQuotes()
     }
     await loadData()
@@ -475,7 +644,51 @@ async function handleRefresh() {
   }
 }
 
-onMounted(loadData)
+watch(estimateMode, async (value, oldValue) => {
+  const normalized = normalizeEstimateMode(value)
+  if (normalized !== value) {
+    estimateMode.value = normalized
+    return
+  }
+  if (!estimatePreferenceReady.value) {
+    window.localStorage.setItem('fund-holding-estimate-mode', normalized)
+    return
+  }
+  window.localStorage.setItem('fund-holding-estimate-mode', normalized)
+  if (oldValue !== undefined && normalized !== oldValue && window.go?.main?.App?.SaveFundEstimateSourcePreference) {
+    try {
+      await window.go.main.App.SaveFundEstimateSourcePreference(normalized)
+    } catch (error) {
+      console.error(error)
+      message.warning('估算源已在当前页面切换，但保存到个人配置失败')
+    }
+  }
+  if (oldValue !== undefined && normalized !== oldValue) {
+    refreshing.value = true
+    try {
+      if (window.go?.main?.App?.SyncPortfolioQuotesByFundEstimateSource) {
+        await window.go.main.App.SyncPortfolioQuotesByFundEstimateSource(normalized)
+      }
+      await loadData()
+      message.success(`已切换估算源：${estimateModeOptions.find((item) => item.value === normalized)?.label || normalized}`)
+    } catch (error) {
+      console.error(error)
+      message.error('切换估算源后刷新失败')
+    } finally {
+      refreshing.value = false
+    }
+  }
+})
+
+function normalizeEstimateMode(value) {
+  return ['eastmoney_js', 'eastmoney_mobile', 'danjuan_position', 'ai_corrected'].includes(value) ? value : 'eastmoney_js'
+}
+
+onMounted(async () => {
+  await loadEstimatePreference()
+  estimatePreferenceReady.value = true
+  await loadData()
+})
 </script>
 
 <style scoped>
@@ -563,5 +776,26 @@ onMounted(loadData)
 .loss-text {
   color: var(--loss);
   font-weight: 600;
+}
+
+.daily-rate-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.daily-updated-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.18);
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
 }
 </style>

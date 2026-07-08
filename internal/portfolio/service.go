@@ -480,12 +480,17 @@ func (s *Service) GetProfitHistory(days int) []ProfitSnapshot {
 }
 
 func (s *Service) SyncPortfolioQuotes() *PortfolioSummary {
+	return s.SyncPortfolioQuotesByFundEstimateSource(data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) SyncPortfolioQuotesByFundEstimateSource(estimateSource string) *PortfolioSummary {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	holdings := s.GetAllHoldings()
 	for i := range holdings {
 		holding := holdings[i]
 		switch holding.HoldingType {
 		case "fund":
-			s.refreshSingleFundHolding(&holding)
+			s.refreshSingleFundHoldingWithEstimateSource(&holding, estimateSource)
 		default:
 			s.refreshSingleStockHolding(&holding)
 		}
@@ -495,11 +500,16 @@ func (s *Service) SyncPortfolioQuotes() *PortfolioSummary {
 }
 
 func (s *Service) SyncHoldingFundEstimates() int {
+	return s.SyncHoldingFundEstimatesBySource(data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) SyncHoldingFundEstimatesBySource(estimateSource string) int {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	holdings := s.GetHoldingsByType("fund")
 	updated := 0
 	for i := range holdings {
 		holding := holdings[i]
-		s.refreshSingleFundHolding(&holding)
+		s.refreshSingleFundHoldingWithEstimateSource(&holding, estimateSource)
 		db.Dao.Save(&holding)
 		updated++
 	}
@@ -519,6 +529,11 @@ func (s *Service) SyncHoldingStockQuotes() int {
 }
 
 func (s *Service) GetFundDashboard() *FundPortfolioDashboard {
+	return s.GetFundDashboardByFundEstimateSource(data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) GetFundDashboardByFundEstimateSource(estimateSource string) *FundPortfolioDashboard {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	holdings := s.GetHoldingsByType("fund")
 	positions := make([]FundHoldingView, 0, len(holdings))
 	typeMap := map[string]*AllocationItem{}
@@ -530,8 +545,16 @@ func (s *Service) GetFundDashboard() *FundPortfolioDashboard {
 		Summary: PortfolioSummary{},
 	}
 
+	var aiBackfillApi *data.FundApi
+	if estimateSource == "ai_corrected" {
+		aiBackfillApi = data.NewFundApi()
+	}
+
 	for _, holding := range holdings {
-		view := s.buildFundHoldingView(holding)
+		if aiBackfillApi != nil {
+			aiBackfillApi.BackfillAICorrectedFundEstimates(holding.StockCode, 45)
+		}
+		view := s.buildFundHoldingViewWithEstimateSource(holding, estimateSource)
 		positions = append(positions, view)
 
 		dashboard.Summary.TotalCost += holding.TotalCost
@@ -590,14 +613,23 @@ func (s *Service) GetFundDashboard() *FundPortfolioDashboard {
 }
 
 func (s *Service) GetFundProfile(code string) *FundProfile {
-	return s.getFundProfile(code, false)
+	return s.getFundProfile(code, false, data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) GetFundProfileByFundEstimateSource(code string, estimateSource string) *FundProfile {
+	return s.getFundProfile(code, false, estimateSource)
 }
 
 func (s *Service) RefreshFundProfile(code string) *FundProfile {
-	return s.getFundProfile(code, true)
+	return s.getFundProfile(code, true, data.GetSettingConfig().FundEstimateSource)
 }
 
-func (s *Service) getFundProfile(code string, refresh bool) *FundProfile {
+func (s *Service) RefreshFundProfileByFundEstimateSource(code string, estimateSource string) *FundProfile {
+	return s.getFundProfile(code, true, estimateSource)
+}
+
+func (s *Service) getFundProfile(code string, refresh bool, estimateSource string) *FundProfile {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil
@@ -616,7 +648,7 @@ func (s *Service) getFundProfile(code string, refresh bool) *FundProfile {
 	if refresh {
 		s.ensureFundMetricsFreshToday(code)
 		if holding != nil {
-			s.refreshSingleFundHolding(&current)
+			s.refreshSingleFundHoldingWithEstimateSource(&current, estimateSource)
 			db.Dao.Save(&current)
 		} else {
 			ensureFollowedFund(code, current.StockName)
@@ -624,11 +656,14 @@ func (s *Service) getFundProfile(code string, refresh bool) *FundProfile {
 				api.CrawlFundBasic(code)
 			}
 			api.CrawlFundNetUnitValue(code)
-			api.CrawlFundNetEstimatedUnit(code)
+			api.CrawlFundNetEstimatedUnitFromSource(code, estimateSource)
 		}
 	}
 
-	view := s.buildFundHoldingView(current)
+	view := s.buildFundHoldingViewWithEstimateSource(current, estimateSource)
+	if estimateSource == "ai_corrected" {
+		api.BackfillAICorrectedFundEstimates(code, 45)
+	}
 
 	points := make([]FundTrendPoint, 0)
 	updatedAt := strings.TrimSpace(view.LatestDailyUpdatedAt)
@@ -638,26 +673,24 @@ func (s *Service) getFundProfile(code string, refresh bool) *FundProfile {
 		latestReturn = &value
 	}
 
-	if refresh {
-		trend, trendUpdatedAt, trendLatestReturn, err := api.GetFundTrend(code)
-		if err != nil {
-			logger.SugaredLogger.Warnf("get fund trend failed for %s: %v", code, err)
-		} else {
-			updatedAt = trendUpdatedAt
-			latestReturn = trendLatestReturn
-			points = make([]FundTrendPoint, 0, len(trend))
-			for _, point := range trend {
-				points = append(points, FundTrendPoint{
-					Timestamp:   point.Timestamp,
-					Date:        point.Date,
-					Value:       point.Value,
-					DailyReturn: point.DailyReturn,
-				})
-			}
+	trend, trendUpdatedAt, trendLatestReturn, err := api.GetFundTrend(code)
+	if err != nil {
+		logger.SugaredLogger.Warnf("get fund trend failed for %s: %v", code, err)
+	} else {
+		updatedAt = trendUpdatedAt
+		latestReturn = trendLatestReturn
+		points = make([]FundTrendPoint, 0, len(trend))
+		for _, point := range trend {
+			points = append(points, FundTrendPoint{
+				Timestamp:   point.Timestamp,
+				Date:        point.Date,
+				Value:       point.Value,
+				DailyReturn: point.DailyReturn,
+			})
 		}
 	}
 
-	estimateTrendRaw, estimateUpdatedAt, estimateLatestRate, estimateErr := api.GetFundEstimatedTrend(code, time.Now())
+	estimateTrendRaw, estimateUpdatedAt, estimateLatestRate, estimateErr := api.GetFundEstimatedTrendBySource(code, time.Now(), estimateSource)
 	if estimateErr != nil {
 		logger.SugaredLogger.Warnf("get fund estimate trend failed for %s: %v", code, estimateErr)
 	}
@@ -704,9 +737,67 @@ func (s *Service) getFundProfile(code string, refresh bool) *FundProfile {
 		EstimateTrend:          estimatePoints,
 		EstimateTrendUpdatedAt: estimateUpdatedAt,
 		EstimateLatestRate:     estimateLatestRate,
+		EstimateSource:         estimateSource,
+		EstimateCompareTrend:   s.buildFundEstimateCompareTrendBySource(code, points, estimateSource),
 		StageRankings:          stageRankings,
 		StageRankingsUpdatedAt: view.NetUnitValueDate,
 	}
+}
+
+func (s *Service) buildFundEstimateCompareTrend(code string, actualTrend []FundTrendPoint) []FundEstimateComparePoint {
+	return s.buildFundEstimateCompareTrendBySource(code, actualTrend, data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) buildFundEstimateCompareTrendBySource(code string, actualTrend []FundTrendPoint, estimateSource string) []FundEstimateComparePoint {
+	code = strings.TrimSpace(code)
+	if code == "" || len(actualTrend) == 0 {
+		return nil
+	}
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
+
+	startDate := time.Now().AddDate(0, 0, -45).Format("2006-01-02")
+	var snapshots []data.FundEstimateSnapshot
+	if err := db.Dao.Where("code = ? AND trade_date >= ? AND source = ? AND estimated_rate IS NOT NULL", code, startDate, estimateSource).
+		Order("trade_date asc, estimate_time asc").
+		Find(&snapshots).Error; err != nil {
+		logger.SugaredLogger.Warnf("query fund estimate compare trend failed for %s: %v", code, err)
+		return nil
+	}
+	if len(snapshots) == 0 {
+		return nil
+	}
+
+	latestByDate := make(map[string]data.FundEstimateSnapshot)
+	for _, snapshot := range snapshots {
+		if strings.TrimSpace(snapshot.TradeDate) == "" {
+			continue
+		}
+		latestByDate[snapshot.TradeDate] = snapshot
+	}
+
+	result := make([]FundEstimateComparePoint, 0, len(actualTrend))
+	for _, point := range actualTrend {
+		if point.DailyReturn == nil {
+			continue
+		}
+		snapshot, ok := latestByDate[point.Date]
+		if !ok || snapshot.EstimatedRate == nil {
+			continue
+		}
+		estimatedRate := *snapshot.EstimatedRate
+		actualRate := *point.DailyReturn
+		result = append(result, FundEstimateComparePoint{
+			Date:          point.Date,
+			EstimateTime:  snapshot.EstimateTime,
+			EstimatedRate: &estimatedRate,
+			ActualRate:    &actualRate,
+			Source:        defaultLabel(snapshot.Source, "eastmoney"),
+		})
+	}
+	if len(result) > 30 {
+		return result[len(result)-30:]
+	}
+	return result
 }
 
 func (s *Service) EnsureFundUniverse() int64 {
@@ -3621,6 +3712,11 @@ func normalizeFundStagePeriod(raw string) string {
 }
 
 func (s *Service) refreshSingleFundHolding(h *Holding) {
+	s.refreshSingleFundHoldingWithEstimateSource(h, data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) refreshSingleFundHoldingWithEstimateSource(h *Holding, estimateSource string) {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	api := data.NewFundApi()
 	ensureFollowedFund(h.StockCode, h.StockName)
 
@@ -3633,17 +3729,18 @@ func (s *Service) refreshSingleFundHolding(h *Holding) {
 	}
 
 	api.CrawlFundNetUnitValue(h.StockCode)
-	api.CrawlFundNetEstimatedUnit(h.StockCode)
+	api.CrawlFundNetEstimatedUnitFromSource(h.StockCode, estimateSource)
 
 	var followed data.FollowedFund
 	if err := db.Dao.Preload("FundBasic").Where("code = ?", h.StockCode).First(&followed).Error; err != nil {
 		return
 	}
+	sourceEstimate, hasSourceEstimate := latestFreshFundEstimateSnapshot(h.StockCode, estimateSource)
 
 	currentPrice := 0.0
-	estimateFresh := isFreshEstimatedValue(followed.NetEstimatedTime)
-	if estimateFresh && followed.NetEstimatedUnit != nil && *followed.NetEstimatedUnit > 0 {
-		currentPrice = *followed.NetEstimatedUnit
+	estimateFresh := hasSourceEstimate
+	if estimateFresh && sourceEstimate.EstimatedUnit > 0 {
+		currentPrice = sourceEstimate.EstimatedUnit
 	} else if followed.NetUnitValue != nil && *followed.NetUnitValue > 0 {
 		currentPrice = *followed.NetUnitValue
 	}
@@ -3665,10 +3762,10 @@ func (s *Service) refreshSingleFundHolding(h *Holding) {
 	h.LatestDailyUpdatedAt = ""
 	h.TodayChange = 0
 	h.TodayRate = 0
-	if estimateFresh && followed.NetUnitValue != nil && followed.NetEstimatedUnit != nil {
-		h.TodayChange = (*followed.NetEstimatedUnit - *followed.NetUnitValue) * h.Quantity
-		if followed.NetEstimatedRate != nil {
-			h.TodayRate = *followed.NetEstimatedRate
+	if estimateFresh && followed.NetUnitValue != nil {
+		h.TodayChange = (sourceEstimate.EstimatedUnit - *followed.NetUnitValue) * h.Quantity
+		if sourceEstimate.EstimatedRate != nil {
+			h.TodayRate = *sourceEstimate.EstimatedRate
 		}
 	}
 
@@ -3682,13 +3779,27 @@ func (s *Service) refreshSingleFundHolding(h *Holding) {
 	} else {
 		h.LatestDailyUpdatedAt = normalizeFundUpdateTime(followed.NetUnitValueDate)
 	}
+	if confirmed, confirmedErr := api.GetFundConfirmedNetUnitValue(h.StockCode); confirmedErr == nil && confirmed != nil && confirmed.DailyReturn != nil {
+		confirmedDate := strings.TrimSpace(confirmed.Date)
+		if confirmedDate != "" && confirmedDate == strings.TrimSpace(followed.NetUnitValueDate) {
+			latestRate := roundPercent(*confirmed.DailyReturn)
+			h.LatestDailyRate = &latestRate
+			h.LatestDailyUpdatedAt = normalizeFundUpdateTime(confirmedDate)
+		}
+	}
 }
 
 func (s *Service) buildFundHoldingView(h Holding) FundHoldingView {
+	return s.buildFundHoldingViewWithEstimateSource(h, data.GetSettingConfig().FundEstimateSource)
+}
+
+func (s *Service) buildFundHoldingViewWithEstimateSource(h Holding, estimateSource string) FundHoldingView {
+	estimateSource = data.NormalizeFundEstimateSource(estimateSource)
 	view := FundHoldingView{Holding: h}
 
 	var followed data.FollowedFund
 	db.Dao.Preload("FundBasic").Where("code = ?", h.StockCode).First(&followed)
+	sourceEstimate, hasSourceEstimate := latestFreshFundEstimateSnapshot(h.StockCode, estimateSource)
 
 	if strings.TrimSpace(view.StockName) == "" {
 		view.StockName = defaultLabel(followed.Name, followed.FundBasic.Name)
@@ -3702,38 +3813,45 @@ func (s *Service) buildFundHoldingView(h Holding) FundHoldingView {
 	view.TrackingTarget = strings.TrimSpace(followed.FundBasic.TrackingTarget)
 	view.NetUnitValue = followed.NetUnitValue
 	view.NetUnitValueDate = followed.NetUnitValueDate
-	view.NetEstimatedUnit = followed.NetEstimatedUnit
-	view.NetEstimatedTime = followed.NetEstimatedTime
-	view.NetEstimatedRate = followed.NetEstimatedRate
+	if hasSourceEstimate {
+		estimatedUnit := sourceEstimate.EstimatedUnit
+		view.NetEstimatedUnit = &estimatedUnit
+		view.NetEstimatedTime = sourceEstimate.EstimateTime
+		view.NetEstimatedRate = sourceEstimate.EstimatedRate
+	} else {
+		view.NetEstimatedUnit = nil
+		view.NetEstimatedTime = ""
+		view.NetEstimatedRate = nil
+	}
 	view.NetGrowth1 = followed.FundBasic.NetGrowth1
 	view.NetGrowth3 = followed.FundBasic.NetGrowth3
 	view.NetGrowth6 = followed.FundBasic.NetGrowth6
 	view.NetGrowth12 = followed.FundBasic.NetGrowth12
 	view.NetGrowth36 = followed.FundBasic.NetGrowth36
 	view.NetGrowthYTD = followed.FundBasic.NetGrowthYTD
-	view.EstimateUpdated = isFreshEstimatedValue(followed.NetEstimatedTime)
+	view.EstimateUpdated = hasSourceEstimate
 	if view.CurrentPrice <= 0 {
-		if view.EstimateUpdated && followed.NetEstimatedUnit != nil && *followed.NetEstimatedUnit > 0 {
-			view.CurrentPrice = *followed.NetEstimatedUnit
+		if view.EstimateUpdated && view.NetEstimatedUnit != nil && *view.NetEstimatedUnit > 0 {
+			view.CurrentPrice = *view.NetEstimatedUnit
 		} else if followed.NetUnitValue != nil && *followed.NetUnitValue > 0 {
 			view.CurrentPrice = *followed.NetUnitValue
 		}
 	}
-	if view.LatestDailyRate == nil && followed.NetEstimatedRate != nil && view.EstimateUpdated {
-		latestRate := roundPercent(*followed.NetEstimatedRate)
+	if view.LatestDailyRate == nil && view.NetEstimatedRate != nil && view.EstimateUpdated {
+		latestRate := roundPercent(*view.NetEstimatedRate)
 		view.LatestDailyRate = &latestRate
 	}
 	if strings.TrimSpace(view.LatestDailyUpdatedAt) == "" {
 		if view.EstimateUpdated {
-			view.LatestDailyUpdatedAt = normalizeFundUpdateTime(followed.NetEstimatedTime)
+			view.LatestDailyUpdatedAt = normalizeFundUpdateTime(view.NetEstimatedTime)
 		} else {
 			view.LatestDailyUpdatedAt = normalizeFundUpdateTime(followed.NetUnitValueDate)
 		}
 	}
 	if view.EstimateUpdated {
 		view.EstimateStatus = "今日估算已更新"
-	} else if strings.TrimSpace(followed.NetEstimatedTime) != "" {
-		view.EstimateStatus = "上次估值 " + followed.NetEstimatedTime
+	} else if strings.TrimSpace(view.NetEstimatedTime) != "" {
+		view.EstimateStatus = "上次估值 " + view.NetEstimatedTime
 	} else {
 		view.EstimateStatus = "暂无估值"
 	}
@@ -4481,6 +4599,23 @@ func isFreshEstimatedValue(estimatedTime string) bool {
 
 	today := time.Now().Format("2006-01-02")
 	return parsed.Format("2006-01-02") == today
+}
+
+func latestFreshFundEstimateSnapshot(code string, estimateSource string) (data.FundEstimateSnapshot, bool) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return data.FundEstimateSnapshot{}, false
+	}
+	source := data.NormalizeFundEstimateSource(estimateSource)
+	today := time.Now().Format("2006-01-02")
+	var snapshot data.FundEstimateSnapshot
+	err := db.Dao.Where("code = ? AND trade_date = ? AND source = ? AND estimated_unit > 0", code, today, source).
+		Order("estimate_time desc").
+		First(&snapshot).Error
+	if err != nil {
+		return data.FundEstimateSnapshot{}, false
+	}
+	return snapshot, isFreshEstimatedValue(snapshot.EstimateTime)
 }
 
 func isSameTradingDayString(value string, target time.Time) bool {

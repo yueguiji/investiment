@@ -9,6 +9,7 @@ import (
 	"go-stock/backend/models"
 	"go-stock/backend/util"
 	"io/ioutil"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -62,7 +63,7 @@ func TestGetTelegraphSearch(t *testing.T) {
 }
 func TestCailianpressWeb(t *testing.T) {
 	db.Init("../../data/stock.db")
-	searchWords := "北向资金"
+	searchWords := ""
 	res := NewMarketNewsApi().CailianpressWeb(searchWords)
 	md := util.MarkdownTableWithTitle(searchWords+"财联社新闻", res.List)
 	logger.SugaredLogger.Info(md)
@@ -90,9 +91,8 @@ func TestGetAllStocks(t *testing.T) {
 func TestFilterStocks(t *testing.T) {
 	db.Init("../../data/stock.db")
 
-	res := NewStockDataApi().GetAllStocks(1, 100, "上海石化", models.TechnicalIndicators{
-		MACDGOLDENFORK: false,
-		BREAKUPMA5DAYS: false,
+	res := NewStockDataApi().GetAllStocks(1, 100, "", models.TechnicalIndicators{
+		CONCERN_RANK_7DAYS: 50,
 	})
 	logger.SugaredLogger.Infof("%+#v", len((*res).Result.Data))
 
@@ -115,7 +115,7 @@ func TestSearchStockPriceInfo(t *testing.T) {
 }
 func TestGetStockMinutePriceData(t *testing.T) {
 	db.Init("../../data/stock.db")
-	data, date := NewStockDataApi().GetStockMinutePriceData("usTSLA.OQ")
+	data, date := NewStockDataApi().GetStockMinutePriceData("sh600171")
 	logger.SugaredLogger.Infof("date:%s", date)
 	logger.SugaredLogger.Infof("%+#v", *data)
 }
@@ -229,6 +229,10 @@ func TestNewStockDataApi(t *testing.T) {
 	for _, data := range *datas {
 		t.Log(data)
 	}
+	datas, _ = stockDataApi.GetStockCodeRealTimeData("002352.SZ", "600859.SH", "600745.SH", "09660.HK", "00700.HK")
+	for _, data := range *datas {
+		t.Log(data)
+	}
 }
 
 func TestGetStockBaseInfo(t *testing.T) {
@@ -339,6 +343,454 @@ func TestGetStockHistoryMoneyData(t *testing.T) {
 func TestGetIndustryValuation(t *testing.T) {
 	db.Init("../../data/stock.db")
 	stockDataApi := NewStockDataApi()
-	res := stockDataApi.GetIndustryValuation("AI应用")
+	res := stockDataApi.GetIndustryValuation("消费电子")
 	logger.SugaredLogger.Infof("%s", util.MarkdownTableWithTitle(" 消费电子行业估值", res.Result.Data))
+}
+
+func Test11(t *testing.T) {
+	url := "https://www.iwencai.com/customized/chart/get-robot-data"
+	body := `{
+		"source": "Ths_iwencai_Xuangu",
+			"version": "2.0",
+			"query_area": "",
+			"block_list": "",
+			"add_info": "{\"urp\":{\"scene\":1,\"company\":1,\"business\":1},\"contentType\":\"json\",\"searchInfo\":true}",
+			"question": "立讯精密",
+			"perpage": "50",
+			"page": 1,
+			"secondary_intent": "stock",
+			"log_info": "{\"input_type\":\"typewrite\"}",
+			"rsh": ""
+	}`
+	resp, err := resty.New().R().
+		SetHeader("hexin-v", "AwdKLt3GIiwTSKag8Wve7senlrrUDN9ZNeNfTtnUJrC98S2u4dxrPkWw747q").
+		SetHeader("Content-Type", "application/json;charset=UTF-8").
+		//SetHeader("Cookie", "v=AwdKLt3GIiwTSKag8Wve7senlrrUDN9ZNeNfTtnUJrC98S2u4dxrPkWw747q; other_uid=Ths_iwencai_Xuangu_dt6xi9pjkvlje9ogva7vw9v24diwgcr4;").
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36").
+		SetBody(body).Post(url)
+	if err != nil {
+		logger.SugaredLogger.Error(err.Error())
+		return
+	}
+	logger.SugaredLogger.Infof("%s", resp.String())
+}
+
+func TestGetStockRZRQInfo(t *testing.T) {
+	db.Init("../../data/stock.db")
+	stockDataApi := NewStockDataApi()
+	res := stockDataApi.GetStockRZRQInfo("SZ001389")
+	logger.SugaredLogger.Infof("%s", util.MarkdownTableWithTitle("SZ001389融资融券信息", res.Result.Data))
+}
+
+func TestGetMutualTop10Deal(t *testing.T) {
+	db.Init("../../data/stock.db")
+	stockDataApi := NewStockDataApi()
+	res := stockDataApi.GetMutualTop10Deal("002", "2026-03-17", 1, 10)
+	logger.SugaredLogger.Infof("%s", util.MarkdownTableWithTitle("SZ000001 mutual top 10 deal", res.Result.Data))
+}
+
+func getIwencaiAPIKey(t *testing.T) string {
+	t.Helper()
+	apiKey := os.Getenv("IWENCAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("IWENCAI_API_KEY environment variable not set, skipping test")
+	}
+	return apiKey
+}
+
+func getEmAPIKey(t *testing.T) string {
+	t.Helper()
+	apiKey := os.Getenv("EM_API_KEY")
+	if apiKey == "" {
+		t.Skip("EM_API_KEY environment variable not set, skipping test")
+	}
+	return apiKey
+}
+
+func emTestHeaders(apiKey string) map[string]string {
+	emBaseInfo, _ := json.Marshal(map[string]string{"productType": "mx"})
+	return map[string]string{
+		"Content-Type": "application/json",
+		"em_base_info": string(emBaseInfo),
+		"em_api_key":   apiKey,
+	}
+}
+
+func TestEmValidateEntity(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(map[string]string{
+			"Content-Type": "application/json",
+			"em_api_key":   apiKey,
+		}).
+		SetBody(map[string]string{"content": "贵州茅台"}).
+		Post("https://ai-saas.eastmoney.com/proxy/entity/dialogTagsV2")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	t.Logf("Response: %s", resp.String())
+}
+
+func TestEmFinancialQA(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(map[string]string{
+			"Content-Type": "application/json",
+			"Accept":       "application/json",
+			"em_api_key":   apiKey,
+		}).
+		SetBody(map[string]any{"question": "贵州茅台最新股价是多少"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/ask")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 500 {
+		body = body[:500] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmFinanceDataQuery(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]any{
+			"query": "贵州茅台最新价",
+			"toolContext": map[string]any{
+				"callId":   "call_00000001",
+				"userInfo": map[string]string{"userId": "user_00000001"},
+			},
+		}).
+		Post("https://ai-saas.eastmoney.com/proxy/b/mcp/tool/searchData")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmFinanceSearch(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]any{
+			"query": "贵州茅台",
+			"toolContext": map[string]any{
+				"callId": "call_00000002",
+			},
+		}).
+		Post("https://ai-saas.eastmoney.com/proxy/b/mcp/tool/searchNews")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmEarningsReview(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]string{
+			"query":      "600519.SH",
+			"reportDate": "2025-03-31",
+		}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/write/performance/comment")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmIndustryResearch(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]string{"query": "白酒行业"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/write/industry/research")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmTrackingReport(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]string{"query": "贵州茅台"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/write/tracking/report")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmReportList(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(emTestHeaders(apiKey)).
+		SetBody(map[string]string{"emCode": "600519.SH"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/write/choice/reportList")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	t.Logf("Response: %s", resp.String())
+}
+
+func TestEmComparableCompanyAnalysis(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(map[string]string{
+			"Content-Type": "application/json",
+			"em_api_key":   apiKey,
+		}).
+		SetBody(map[string]string{"question": "东方财富"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/comparable-company-analysis")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestEmHotspotDiscovery(t *testing.T) {
+	apiKey := getEmAPIKey(t)
+
+	resp, err := resty.New().R().
+		SetHeaders(map[string]string{
+			"Content-Type": "application/json",
+			"em_api_key":   apiKey,
+		}).
+		SetBody(map[string]string{"question": "今日热点"}).
+		Post("https://ai-saas.eastmoney.com/proxy/app-robo-advisor-api/assistant/hotspot-discovery")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+	body := resp.String()
+	if len(body) > 800 {
+		body = body[:800] + "..."
+	}
+	t.Logf("Response: %s", body)
+}
+
+func TestIwencaiQueryAPI(t *testing.T) {
+	apiKey := getIwencaiAPIKey(t)
+
+	query := "贵州茅台最新价"
+	page := 1
+	limit := 5
+
+	reqBody := map[string]any{
+		"query":        query,
+		"page":         fmt.Sprintf("%d", page),
+		"limit":        fmt.Sprintf("%d", limit),
+		"is_cache":     "1",
+		"expand_index": "true",
+		"app_id":       "AIME_SKILL",
+	}
+
+	resp, err := resty.New().R().
+		SetHeaders(iwencaiCommonHeaders(apiKey, "query2data", "1.0.0")).
+		SetBody(reqBody).
+		Post("https://openapi.iwencai.com/v1/query2data")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+
+	if resp.StatusCode() == 200 {
+		var result IwencaiResponse
+		if err := json.Unmarshal(resp.Body(), &result); err == nil {
+			t.Logf("Status Code: %d, Msg: %s, CodeCount: %d, Datas: %d",
+				result.StatusCode, result.StatusMsg, result.CodeCount, len(result.Datas))
+			if len(result.Datas) > 0 {
+				t.Logf("第一条数据: %v", result.Datas[0])
+			}
+		}
+	} else {
+		t.Logf("Response Body: %s", resp.String())
+	}
+}
+
+func TestIwencaiSearchAPI(t *testing.T) {
+	apiKey := getIwencaiAPIKey(t)
+
+	reqBody := map[string]any{
+		"channels": []string{"news"},
+		"app_id":   "AIME_SKILL",
+		"query":    "贵州茅台",
+	}
+
+	resp, err := resty.New().R().
+		SetHeaders(iwencaiCommonHeaders(apiKey, "news-search", "1.0.0")).
+		SetBody(reqBody).
+		Post("https://openapi.iwencai.com/v1/comprehensive/search")
+
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+
+	t.Logf("HTTP Status: %d", resp.StatusCode())
+
+	if resp.StatusCode() == 200 {
+		var result IwencaiSearchResponse
+		if err := json.Unmarshal(resp.Body(), &result); err == nil {
+			t.Logf("Search Results Count: %d", len(result.Data))
+			if len(result.Data) > 0 {
+				for i, item := range result.Data {
+					if i >= 3 {
+						break
+					}
+					t.Logf("  [%d] %s (%s)", i+1, item.Title, item.PublishDate)
+				}
+			}
+		}
+	} else {
+		t.Logf("Response Body: %s", resp.String())
+	}
+}
+
+func TestF10LatestFinance(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	resp, err := api.GetStockLatestFinance("300390.SZ")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	if resp.Result != nil {
+		t.Logf("Success: %v, Count: %d", resp.Success, resp.Result.Count)
+	} else {
+		t.Logf("Result is nil, Success: %v, Message: %s", resp.Success, resp.Message)
+	}
+	md := api.GetStockLatestFinanceToMarkdown("300390.SZ")
+	t.Logf("Markdown :\n%s", func() string {
+		return md
+	}())
+}
+
+func TestF10QtrMainFinance(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockQtrMainFinanceToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10OrgPredict(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockOrgPredictToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10PredictSummary(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockPredictSummaryToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10ValuationPercentile(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockValuationPercentileToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10MarginTrading(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockMarginTradingToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10BlockTrade(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockBlockTradeToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10HolderTrend(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockHolderTrendToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10Billboard(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockBillboardToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
+}
+
+func TestF10OperationDeptTrade(t *testing.T) {
+	db.Init("../../data/stock.db")
+	api := NewStockDataApi()
+	md := api.GetStockOperationDeptTradeToMarkdown("600519")
+	t.Logf("Markdown:\n%s", md)
 }

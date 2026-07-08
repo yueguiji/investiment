@@ -40,4 +40,6 @@ vendor/
 .vscode/
 *.swp
 /.codex/
+/.buildcache/
+/.trae/
 __tmp*.go

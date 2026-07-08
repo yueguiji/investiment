@@ -46,6 +46,18 @@ func InitDB(dbPath string) {
 	db.Dao.AutoMigrate(&models.SentimentResultAnalyze{})
 	db.Dao.AutoMigrate(&models.AiRecommendStocks{})
 	db.Dao.AutoMigrate(&models.AllStockInfo{})
+	db.Dao.AutoMigrate(&models.MarketStatistic{})
+	db.Dao.AutoMigrate(&models.BKFundFlow{})
+	db.Dao.AutoMigrate(&models.ConceptFundFlow{})
+	db.Dao.AutoMigrate(&models.CronTask{})
+	db.Dao.AutoMigrate(&models.AiAssistantSession{})
+	db.Dao.AutoMigrate(&models.MCPServer{})
+	db.Dao.AutoMigrate(&models.MCPServerTool{})
+	db.Dao.AutoMigrate(&models.Skill{})
+	db.Dao.AutoMigrate(&models.CustomStrategy{})
+	db.Dao.AutoMigrate(&models.GlobalStockIndex{})
+	db.Dao.AutoMigrate(&db.ChatMemory{})
+	db.Dao.AutoMigrate(&data.TradingRecord{})
 
 	// host app tables
 	db.Dao.AutoMigrate(&asset.Asset{})

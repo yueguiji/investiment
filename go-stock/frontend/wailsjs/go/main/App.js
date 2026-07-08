@@ -150,6 +150,18 @@ export function GetFollowedFund() {
   return window['go']['main']['App']['GetFollowedFund']();
 }
 
+export function GetAllGroupStocks() {
+  return window['go']['main']['App']['GetAllGroupStocks']();
+}
+
+export function GetFundKLine(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetFundKLine'](arg1, arg2, arg3);
+}
+
+export function GetFundTop10Holdings(arg1) {
+  return window['go']['main']['App']['GetFundTop10Holdings'](arg1);
+}
+
 export function GetGroupList() {
   return window['go']['main']['App']['GetGroupList']();
 }
@@ -348,6 +360,10 @@ export function UnFollowFund(arg1) {
 
 export function UpdateConfig(arg1) {
   return window['go']['main']['App']['UpdateConfig'](arg1);
+}
+
+export function UpdateGroup(arg1, arg2) {
+  return window['go']['main']['App']['UpdateGroup'](arg1, arg2);
 }
 
 export function UpdateGroupSort(arg1, arg2) {

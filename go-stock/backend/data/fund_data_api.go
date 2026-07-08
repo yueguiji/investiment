@@ -14,7 +14,9 @@ import (
 	"golang.org/x/net/html/charset"
 	"html"
 	"io"
+	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -726,6 +728,316 @@ func (f *FundApi) GetFollowedFund() []FollowedFund {
 	}
 	return funds
 }
+
+type FollowedFundPagedResult struct {
+	Items      []FollowedFund `json:"items"`
+	TotalCount int64          `json:"totalCount"`
+	PageIndex  int            `json:"pageIndex"`
+	PageSize   int            `json:"pageSize"`
+	TotalPages int            `json:"totalPages"`
+}
+
+func (f *FundApi) GetFollowedFundPaged(pageIndex, pageSize int, keyword string) *FollowedFundPagedResult {
+	if pageIndex <= 0 {
+		pageIndex = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 4
+	}
+
+	all := f.GetFollowedFund()
+	keyword = strings.TrimSpace(keyword)
+	filtered := make([]FollowedFund, 0, len(all))
+	for _, fund := range all {
+		if keyword == "" ||
+			strings.Contains(fund.Code, keyword) ||
+			strings.Contains(fund.Name, keyword) ||
+			strings.Contains(fund.FundBasic.FullName, keyword) {
+			filtered = append(filtered, fund)
+		}
+	}
+
+	totalCount := int64(len(filtered))
+	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	start := (pageIndex - 1) * pageSize
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	return &FollowedFundPagedResult{
+		Items:      filtered[start:end],
+		TotalCount: totalCount,
+		PageIndex:  pageIndex,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}
+}
+
+type FundRankingItem struct {
+	Code             string   `json:"code"`
+	Name             string   `json:"name"`
+	Pinyin           string   `json:"pinyin"`
+	NetValueDate     string   `json:"netValueDate"`
+	NetUnitValue     *float64 `json:"netUnitValue"`
+	NetAccumulated   *float64 `json:"netAccumulated"`
+	DailyGrowth      *float64 `json:"dailyGrowth"`
+	WeekGrowth       *float64 `json:"weekGrowth"`
+	MonthGrowth      *float64 `json:"monthGrowth"`
+	ThreeMonthGrowth *float64 `json:"threeMonthGrowth"`
+	SixMonthGrowth   *float64 `json:"sixMonthGrowth"`
+	YearGrowth       *float64 `json:"yearGrowth"`
+	TwoYearGrowth    *float64 `json:"twoYearGrowth"`
+	ThreeYearGrowth  *float64 `json:"threeYearGrowth"`
+	YTDGrowth        *float64 `json:"ytdGrowth"`
+	SinceInception   *float64 `json:"sinceInception"`
+	EstablishDate    string   `json:"establishDate"`
+	Purchasable      bool     `json:"purchasable"`
+	Scale            *float64 `json:"scale"`
+	PurchaseRate     *float64 `json:"purchaseRate"`
+	DiscountRate     *float64 `json:"discountRate"`
+	FundTypeDetail   string   `json:"fundTypeDetail"`
+}
+
+type FundRankingResult struct {
+	Items      []FundRankingItem `json:"items"`
+	TotalCount int               `json:"totalCount"`
+	PageIndex  int               `json:"pageIndex"`
+	PageSize   int               `json:"pageSize"`
+	TotalPages int               `json:"totalPages"`
+}
+
+type FundSearchItem struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+func fundParseFloatPtr(s string) *float64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return nil
+	}
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	return &val
+}
+
+func (f *FundApi) SearchFundCodes(keyword string) []FundSearchItem {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []FundSearchItem{}
+	}
+	url := fmt.Sprintf("https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?callback=&m=1&key=%s", keyword)
+	resp, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", getRandomUA()).
+		SetHeader("Referer", "https://fund.eastmoney.com/").
+		Get(url)
+	if err != nil || resp.StatusCode() != 200 {
+		return []FundSearchItem{}
+	}
+
+	var result struct {
+		Datas []struct {
+			Code         string `json:"CODE"`
+			CodeLower    string `json:"Code"`
+			Name         string `json:"NAME"`
+			NameLower    string `json:"Name"`
+			Type         string `json:"CATEGORYDESC"`
+			FundBaseInfo *struct {
+				FCODE     string `json:"FCODE"`
+				SHORTNAME string `json:"SHORTNAME"`
+				FTYPE     string `json:"FTYPE"`
+			} `json:"FundBaseInfo"`
+		} `json:"Datas"`
+	}
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return []FundSearchItem{}
+	}
+
+	items := make([]FundSearchItem, 0, len(result.Datas))
+	for _, item := range result.Datas {
+		code := strings.TrimSpace(item.Code)
+		if code == "" {
+			code = strings.TrimSpace(item.CodeLower)
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = strings.TrimSpace(item.NameLower)
+		}
+		fundType := strings.TrimSpace(item.Type)
+		if item.FundBaseInfo != nil {
+			if code == "" {
+				code = strings.TrimSpace(item.FundBaseInfo.FCODE)
+			}
+			if name == "" {
+				name = strings.TrimSpace(item.FundBaseInfo.SHORTNAME)
+			}
+			if fundType == "" {
+				fundType = strings.TrimSpace(item.FundBaseInfo.FTYPE)
+			}
+		}
+		if code == "" || name == "" {
+			continue
+		}
+		items = append(items, FundSearchItem{Code: code, Name: name, Type: fundType})
+
+		var count int64
+		db.Dao.Model(&FundBasic{}).Where("code = ?", code).Count(&count)
+		if count == 0 {
+			db.Dao.Create(&FundBasic{Code: code, Name: name, Type: fundType})
+		} else {
+			db.Dao.Model(&FundBasic{}).Where("code = ?", code).Updates(map[string]any{"name": name, "type": fundType})
+		}
+	}
+	return items
+}
+
+func (f *FundApi) GetFundRanking(marketType, fundType, sortField, sortOrder string, pageIndex, pageSize int) (*FundRankingResult, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.SugaredLogger.Errorf("GetFundRanking panic: %v", r)
+		}
+	}()
+
+	if marketType == "" {
+		marketType = "kf"
+	}
+	if fundType == "" {
+		fundType = "all"
+	}
+	if sortField == "" {
+		sortField = "jnzf"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+	if pageIndex <= 0 {
+		pageIndex = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	referer := "https://fund.eastmoney.com/data/fundranking.html"
+	if marketType == "fb" {
+		referer = "https://fund.eastmoney.com/data/fbsfundranking.html"
+		if fundType == "all" || fundType == "gp" || fundType == "hh" || fundType == "zq" || fundType == "zs" || fundType == "qdii" || fundType == "fof" {
+			fundType = "ct"
+		}
+	}
+
+	queryParams := map[string]string{
+		"op": "ph",
+		"dt": marketType,
+		"ft": fundType,
+		"rs": "",
+		"gs": "0",
+		"sc": sortField,
+		"st": sortOrder,
+		"sd": "",
+		"ed": "",
+		"pi": strconv.Itoa(pageIndex),
+		"pn": strconv.Itoa(pageSize),
+		"v":  strconv.FormatInt(time.Now().UnixMilli(), 10),
+	}
+	if marketType == "kf" {
+		queryParams["qdii"] = ""
+		queryParams["tabSubtype"] = ",,,,"
+		queryParams["dx"] = "1"
+	}
+
+	resp, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", getRandomUA()).
+		SetHeader("Referer", referer).
+		SetQueryParams(queryParams).
+		Get("https://fund.eastmoney.com/data/rankhandler.aspx")
+	if err != nil {
+		return nil, fmt.Errorf("request fund ranking API failed: %w", err)
+	}
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("fund ranking HTTP status: %d", resp.StatusCode())
+	}
+
+	body := string(resp.Body())
+	startIdx := strings.Index(body, "datas:[")
+	if startIdx == -1 {
+		return nil, fmt.Errorf("fund ranking datas not found")
+	}
+	startIdx += len("datas:[")
+	endIdx := strings.Index(body[startIdx:], "]")
+	if endIdx == -1 {
+		return nil, fmt.Errorf("fund ranking data format invalid")
+	}
+	datasContent := body[startIdx : startIdx+endIdx]
+
+	totalCount := 0
+	if match := regexp.MustCompile(`allRecords:(\d+)`).FindStringSubmatch(body); len(match) > 1 {
+		totalCount, _ = strconv.Atoi(match[1])
+	}
+	totalPages := 0
+	if match := regexp.MustCompile(`allPages:(\d+)`).FindStringSubmatch(body); len(match) > 1 {
+		totalPages, _ = strconv.Atoi(match[1])
+	}
+
+	records := regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(datasContent, -1)
+	items := make([]FundRankingItem, 0, len(records))
+	for _, record := range records {
+		if len(record) < 2 {
+			continue
+		}
+		fields := strings.Split(record[1], ",")
+		if len(fields) < 17 {
+			continue
+		}
+		item := FundRankingItem{
+			Code:             fields[0],
+			Name:             fields[1],
+			Pinyin:           fields[2],
+			NetValueDate:     fields[3],
+			NetUnitValue:     fundParseFloatPtr(fields[4]),
+			NetAccumulated:   fundParseFloatPtr(fields[5]),
+			DailyGrowth:      fundParseFloatPtr(fields[6]),
+			WeekGrowth:       fundParseFloatPtr(fields[7]),
+			MonthGrowth:      fundParseFloatPtr(fields[8]),
+			ThreeMonthGrowth: fundParseFloatPtr(fields[9]),
+			SixMonthGrowth:   fundParseFloatPtr(fields[10]),
+			YearGrowth:       fundParseFloatPtr(fields[11]),
+			TwoYearGrowth:    fundParseFloatPtr(fields[12]),
+			ThreeYearGrowth:  fundParseFloatPtr(fields[13]),
+			YTDGrowth:        fundParseFloatPtr(fields[14]),
+			SinceInception:   fundParseFloatPtr(fields[15]),
+			EstablishDate:    fields[16],
+		}
+		if marketType == "kf" && len(fields) >= 21 {
+			item.Purchasable = fields[17] == "1"
+			item.Scale = fundParseFloatPtr(fields[18])
+			item.PurchaseRate = fundParseFloatPtr(fields[19])
+			item.DiscountRate = fundParseFloatPtr(fields[20])
+		} else if marketType == "fb" && len(fields) >= 23 {
+			item.FundTypeDetail = fields[21]
+			item.Scale = fundParseFloatPtr(fields[22])
+		}
+		items = append(items, item)
+	}
+
+	return &FundRankingResult{
+		Items:      items,
+		TotalCount: totalCount,
+		PageIndex:  pageIndex,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}, nil
+}
+
 func (f *FundApi) FollowFund(fundCode string) string {
 	var fund FundBasic
 	db.Dao.Where("code=?", fundCode).First(&fund)
@@ -886,6 +1198,29 @@ type FundNetUnitValue struct {
 	Gztime   string `json:"gztime"`
 }
 
+type fundMobileEstimateResponse struct {
+	Datas []struct {
+		Code             string `json:"FCODE"`
+		Name             string `json:"SHORTNAME"`
+		NetEstimatedUnit string `json:"GSZ"`
+		NetEstimatedRate string `json:"GSZZL"`
+		NetEstimatedTime string `json:"GZTIME"`
+	} `json:"Datas"`
+	Success bool `json:"Success"`
+}
+
+type danjuanFundDetailResponse struct {
+	Data struct {
+		FundPosition struct {
+			StockList []struct {
+				Percent          float64 `json:"percent"`
+				ChangePercentage float64 `json:"change_percentage"`
+			} `json:"stock_list"`
+		} `json:"fund_position"`
+	} `json:"data"`
+	ResultCode int `json:"result_code"`
+}
+
 type FundTrendPoint struct {
 	Timestamp   int64    `json:"timestamp"`
 	Date        string   `json:"date"`
@@ -898,6 +1233,15 @@ type FundEstimatePoint struct {
 	Time          string   `json:"time"`
 	EstimatedUnit float64  `json:"estimatedUnit"`
 	EstimatedRate *float64 `json:"estimatedRate"`
+}
+
+type FundConfirmedNetUnit struct {
+	Name         string
+	Code         string
+	UnitValue    float64
+	PreviousUnit float64
+	Date         string
+	DailyReturn  *float64
 }
 
 type FundStageRanking struct {
@@ -970,6 +1314,10 @@ func (f *FundApi) GetFundTrend(code string) ([]FundTrendPoint, string, *float64,
 }
 
 func (f *FundApi) GetFundEstimatedTrend(code string, day time.Time) ([]FundEstimatePoint, string, *float64, error) {
+	return f.GetFundEstimatedTrendBySource(code, day, GetSettingConfig().FundEstimateSource)
+}
+
+func (f *FundApi) GetFundEstimatedTrendBySource(code string, day time.Time, source string) ([]FundEstimatePoint, string, *float64, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, "", nil, nil
@@ -977,7 +1325,7 @@ func (f *FundApi) GetFundEstimatedTrend(code string, day time.Time) ([]FundEstim
 
 	tradeDate := day.Format("2006-01-02")
 	var snapshots []FundEstimateSnapshot
-	if err := db.Dao.Where("code = ? AND trade_date = ?", code, tradeDate).
+	if err := db.Dao.Where("code = ? AND trade_date = ? AND source = ?", code, tradeDate, NormalizeFundEstimateSource(source)).
 		Order("estimate_time asc").
 		Find(&snapshots).Error; err != nil {
 		return nil, "", nil, err
@@ -1242,6 +1590,733 @@ func parseFundRankDelta(raw string) (int, string) {
 
 // CrawlFundNetEstimatedUnit fetches intraday estimated unit value data.
 func (f *FundApi) CrawlFundNetEstimatedUnit(code string) {
+	f.CrawlFundNetEstimatedUnitFromSource(code, "eastmoney_js")
+}
+
+func (f *FundApi) CrawlFundNetEstimatedUnitFromSource(code string, source string) {
+	switch NormalizeFundEstimateSource(source) {
+	case "eastmoney_mobile":
+		f.crawlFundNetEstimatedUnitFromEastmoneyMobile(code)
+	case "danjuan_position":
+		f.crawlFundNetEstimatedUnitFromDanjuanPosition(code)
+	case "ai_corrected":
+		f.crawlFundNetEstimatedUnitFromAICorrected(code)
+	default:
+		f.crawlFundNetEstimatedUnitFromEastmoneyJS(code)
+	}
+}
+
+type fundEstimateSourceScore struct {
+	Bias      float64
+	MAE       float64
+	Samples   int
+	Intercept float64
+	Slope     float64
+	LinearMAE float64
+}
+
+func (f *FundApi) crawlFundNetEstimatedUnitFromAICorrected(code string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return
+	}
+
+	baseSources := aiCorrectedCurrentSources()
+	for _, source := range baseSources {
+		f.CrawlFundNetEstimatedUnitFromSource(code, source)
+	}
+
+	var followed FollowedFund
+	if err := db.Dao.Preload("FundBasic").Where("code = ?", code).First(&followed).Error; err != nil {
+		return
+	}
+	if followed.NetUnitValue == nil || *followed.NetUnitValue <= 0 {
+		return
+	}
+
+	latestSnapshots := f.latestTodayFundEstimateSnapshots(code, baseSources)
+	if len(latestSnapshots) == 0 {
+		return
+	}
+
+	actualRates := f.recentActualFundDailyReturns(code)
+	category := inferAICorrectedFundCategory(defaultLabelForFundEstimate(followed.FundBasic.Type, defaultLabelForFundEstimate(followed.FundBasic.Name, followed.Name)))
+	name := defaultLabelForFundEstimate(followed.Name, followed.FundBasic.Name)
+	today := time.Now().Format("2006-01-02")
+	historySnapshots := f.latestFundEstimateSnapshotsSince(code, time.Now().AddDate(0, 0, -75).Format("2006-01-02"), aiCorrectedHistorySources())
+	for source, snapshot := range latestSnapshots {
+		historySnapshots[today+"|"+canonicalAIEstimateSource(source)] = snapshot
+	}
+	corrected, ok := buildAICorrectedSnapshotForDate(code, name, today, baseSources, historySnapshots, actualRates, category, followed.NetUnitValue)
+	if !ok || corrected.EstimatedRate == nil {
+		return
+	}
+
+	fund := &FollowedFund{
+		Code:             code,
+		Name:             name,
+		NetEstimatedTime: corrected.EstimateTime,
+		NetEstimatedUnit: &corrected.EstimatedUnit,
+		NetEstimatedRate: corrected.EstimatedRate,
+	}
+	db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
+	f.saveFundEstimateSnapshotWithSource(fund.Code, fund.Name, fund.NetEstimatedTime, fund.NetEstimatedUnit, fund.NetEstimatedRate, "ai_corrected")
+	f.BackfillAICorrectedFundEstimates(code, 45)
+}
+
+func (f *FundApi) BackfillAICorrectedFundEstimates(code string, days int) int {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return 0
+	}
+	if days <= 0 {
+		days = 45
+	}
+
+	baseSources := aiCorrectedCurrentSources()
+	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	scoreStartDate := time.Now().AddDate(0, 0, -75).Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
+
+	actualRates := f.recentActualFundDailyReturnsSince(code, scoreStartDate)
+	if len(actualRates) == 0 {
+		return 0
+	}
+
+	var followed FollowedFund
+	_ = db.Dao.Preload("FundBasic").Where("code = ?", code).First(&followed).Error
+	category := inferAICorrectedFundCategory(defaultLabelForFundEstimate(followed.FundBasic.Type, defaultLabelForFundEstimate(followed.FundBasic.Name, followed.Name)))
+	name := defaultLabelForFundEstimate(followed.Name, followed.FundBasic.Name)
+
+	var snapshots []FundEstimateSnapshot
+	if err := db.Dao.Where("code = ? AND trade_date >= ? AND trade_date < ? AND source IN ? AND estimated_rate IS NOT NULL AND estimated_unit > 0", code, startDate, today, aiCorrectedHistorySources()).
+		Order("trade_date asc, source asc, estimate_time asc").
+		Find(&snapshots).Error; err != nil {
+		logger.SugaredLogger.Warnf("query fund estimate snapshots for ai backfill failed for %s: %v", code, err)
+		return 0
+	}
+	historySnapshots := f.latestFundEstimateSnapshotsSince(code, scoreStartDate, aiCorrectedHistorySources())
+	if len(snapshots) == 0 && len(historySnapshots) == 0 {
+		return 0
+	}
+
+	dateSet := make(map[string]bool)
+	for _, snapshot := range snapshots {
+		if snapshot.EstimatedRate == nil || strings.TrimSpace(snapshot.TradeDate) == "" {
+			continue
+		}
+		dateSet[snapshot.TradeDate] = true
+	}
+
+	created := 0
+	for tradeDate := range dateSet {
+		if _, ok := actualRates[tradeDate]; !ok {
+			continue
+		}
+		var existing FundEstimateSnapshot
+		err := db.Dao.Where("code = ? AND trade_date = ? AND source = ?", code, tradeDate, "ai_corrected").First(&existing).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			continue
+		}
+
+		corrected, ok := buildAICorrectedSnapshotForDate(code, name, tradeDate, baseSources, historySnapshots, actualRates, category, nil)
+		if !ok {
+			continue
+		}
+		if err == nil {
+			if updateErr := db.Dao.Model(&existing).Updates(map[string]interface{}{
+				"name":           corrected.Name,
+				"estimate_time":  corrected.EstimateTime,
+				"estimated_unit": corrected.EstimatedUnit,
+				"estimated_rate": corrected.EstimatedRate,
+			}).Error; updateErr == nil {
+				created++
+			}
+			continue
+		}
+		if err := db.Dao.Create(&corrected).Error; err == nil {
+			created++
+		}
+	}
+	return created
+}
+
+func (f *FundApi) latestTodayFundEstimateSnapshots(code string, sources []string) map[string]FundEstimateSnapshot {
+	result := make(map[string]FundEstimateSnapshot)
+	today := time.Now().Format("2006-01-02")
+	for _, source := range sources {
+		var snapshot FundEstimateSnapshot
+		err := db.Dao.Where("code = ? AND trade_date = ? AND source = ? AND estimated_unit > 0 AND estimated_rate IS NOT NULL", code, today, source).
+			Order("estimate_time desc").
+			First(&snapshot).Error
+		if err == nil {
+			result[source] = snapshot
+		}
+	}
+	return result
+}
+
+func (f *FundApi) recentActualFundDailyReturns(code string) map[string]float64 {
+	return f.recentActualFundDailyReturnsSince(code, time.Now().AddDate(0, 0, -75).Format("2006-01-02"))
+}
+
+func (f *FundApi) recentActualFundDailyReturnsSince(code string, startDate string) map[string]float64 {
+	result := make(map[string]float64)
+	trend, _, _, err := f.GetFundTrend(code)
+	if err != nil {
+		return result
+	}
+	for _, point := range trend {
+		if point.DailyReturn == nil || strings.TrimSpace(point.Date) == "" || point.Date < startDate {
+			continue
+		}
+		result[point.Date] = *point.DailyReturn
+	}
+	return result
+}
+
+func (f *FundApi) estimateSourceScores(code string, sources []string, actualRates map[string]float64) map[string]fundEstimateSourceScore {
+	return f.estimateSourceScoresUntil(code, sources, actualRates, "")
+}
+
+func (f *FundApi) estimateSourceScoresUntil(code string, sources []string, actualRates map[string]float64, beforeDate string) map[string]fundEstimateSourceScore {
+	if len(actualRates) == 0 {
+		return defaultFundEstimateSourceScores(sources)
+	}
+
+	startDate := time.Now().AddDate(0, 0, -75).Format("2006-01-02")
+	latestByDateSource := f.latestFundEstimateSnapshotsSince(code, startDate, aiCorrectedHistorySources())
+	return estimateSourceScoresFromSnapshots(sources, actualRates, latestByDateSource, beforeDate)
+}
+
+func defaultFundEstimateSourceScores(sources []string) map[string]fundEstimateSourceScore {
+	result := make(map[string]fundEstimateSourceScore, len(sources))
+	for _, source := range sources {
+		result[canonicalAIEstimateSource(source)] = fundEstimateSourceScore{MAE: 0.45}
+	}
+	return result
+}
+
+func estimateSourceScoresFromSnapshots(sources []string, actualRates map[string]float64, latestByDateSource map[string]FundEstimateSnapshot, beforeDate string) map[string]fundEstimateSourceScore {
+	result := defaultFundEstimateSourceScores(sources)
+	if len(actualRates) == 0 || len(latestByDateSource) == 0 {
+		return result
+	}
+	type acc struct {
+		errSum float64
+		absSum float64
+		count  int
+		xSum   float64
+		ySum   float64
+		xxSum  float64
+		xySum  float64
+		xs     []float64
+		ys     []float64
+	}
+	accBySource := make(map[string]acc)
+	for _, snapshot := range latestByDateSource {
+		if beforeDate != "" && snapshot.TradeDate >= beforeDate {
+			continue
+		}
+		actualRate, ok := actualRates[snapshot.TradeDate]
+		if !ok || snapshot.EstimatedRate == nil {
+			continue
+		}
+		source := canonicalAIEstimateSource(snapshot.Source)
+		errorValue := *snapshot.EstimatedRate - actualRate
+		item := accBySource[source]
+		item.errSum += errorValue
+		item.absSum += absFloat64(errorValue)
+		item.count++
+		item.xSum += *snapshot.EstimatedRate
+		item.ySum += actualRate
+		item.xxSum += *snapshot.EstimatedRate * *snapshot.EstimatedRate
+		item.xySum += *snapshot.EstimatedRate * actualRate
+		item.xs = append(item.xs, *snapshot.EstimatedRate)
+		item.ys = append(item.ys, actualRate)
+		accBySource[source] = item
+	}
+
+	for _, source := range sources {
+		canonicalSource := canonicalAIEstimateSource(source)
+		item := accBySource[canonicalSource]
+		if item.count == 0 {
+			continue
+		}
+		score := fundEstimateSourceScore{
+			Bias:    item.errSum / float64(item.count),
+			MAE:     item.absSum / float64(item.count),
+			Samples: item.count,
+		}
+		denominator := float64(item.count)*item.xxSum - item.xSum*item.xSum
+		if item.count >= 5 && absFloat64(denominator) > 0.000001 {
+			score.Slope = (float64(item.count)*item.xySum - item.xSum*item.ySum) / denominator
+			score.Intercept = (item.ySum - score.Slope*item.xSum) / float64(item.count)
+		} else {
+			score.Slope = 1
+			score.Intercept = -score.Bias
+		}
+		score.LinearMAE = leaveOneOutLinearMAE(item.xs, item.ys)
+		result[canonicalSource] = score
+	}
+	return result
+}
+
+func leaveOneOutLinearMAE(xs []float64, ys []float64) float64 {
+	if len(xs) < 8 || len(xs) != len(ys) {
+		return 999
+	}
+	total := 0.0
+	count := 0
+	for excluded := range xs {
+		intercept, slope, ok := fitLinearEstimateExcluding(xs, ys, excluded)
+		if !ok || absFloat64(slope) > 4 {
+			continue
+		}
+		predicted := intercept + slope*xs[excluded]
+		total += absFloat64(predicted - ys[excluded])
+		count++
+	}
+	if count == 0 {
+		return 999
+	}
+	return total / float64(count)
+}
+
+func fitLinearEstimateExcluding(xs []float64, ys []float64, excluded int) (float64, float64, bool) {
+	count := 0
+	xSum := 0.0
+	ySum := 0.0
+	xxSum := 0.0
+	xySum := 0.0
+	for i := range xs {
+		if i == excluded {
+			continue
+		}
+		count++
+		xSum += xs[i]
+		ySum += ys[i]
+		xxSum += xs[i] * xs[i]
+		xySum += xs[i] * ys[i]
+	}
+	denominator := float64(count)*xxSum - xSum*xSum
+	if count < 5 || absFloat64(denominator) < 0.000001 {
+		return 0, 0, false
+	}
+	slope := (float64(count)*xySum - xSum*ySum) / denominator
+	intercept := (ySum - slope*xSum) / float64(count)
+	return intercept, slope, true
+}
+
+func (f *FundApi) latestFundEstimateSnapshotsSince(code string, startDate string, sources []string) map[string]FundEstimateSnapshot {
+	result := make(map[string]FundEstimateSnapshot)
+	var snapshots []FundEstimateSnapshot
+	if err := db.Dao.Where("code = ? AND trade_date >= ? AND source IN ? AND estimated_rate IS NOT NULL AND estimated_unit > 0", code, startDate, sources).
+		Order("trade_date asc, source asc, estimate_time asc").
+		Find(&snapshots).Error; err != nil {
+		return result
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.EstimatedRate == nil || strings.TrimSpace(snapshot.TradeDate) == "" {
+			continue
+		}
+		source := canonicalAIEstimateSource(snapshot.Source)
+		key := snapshot.TradeDate + "|" + source
+		existing, ok := result[key]
+		if !ok || snapshot.EstimateTime >= existing.EstimateTime || (snapshot.Source == "eastmoney_js" && existing.Source == "eastmoney") {
+			snapshot.Source = source
+			result[key] = snapshot
+		}
+	}
+	return result
+}
+
+type aiEstimateCandidate struct {
+	Name         string
+	Source       string
+	Rate         float64
+	Unit         float64
+	EstimateTime string
+	Raw          bool
+}
+
+type aiEstimateModelScore struct {
+	MAE     float64
+	Samples int
+}
+
+func buildAICorrectedSnapshotForDate(code string, name string, tradeDate string, sources []string, latestByDateSource map[string]FundEstimateSnapshot, actualRates map[string]float64, category string, baseNetUnitValue *float64) (FundEstimateSnapshot, bool) {
+	candidate, ok := selectAICorrectedCandidate(tradeDate, sources, latestByDateSource, actualRates, category)
+	if !ok {
+		return FundEstimateSnapshot{}, false
+	}
+	estimatedRate := mathutil.RoundToFloat(candidate.Rate, 2)
+	estimatedUnit := candidate.Unit
+	if baseNetUnitValue != nil && *baseNetUnitValue > 0 {
+		estimatedUnit = mathutil.RoundToFloat(*baseNetUnitValue*(1+estimatedRate/100), 4)
+	} else {
+		estimatedUnit = mathutil.RoundToFloat(estimatedUnit, 4)
+	}
+	if estimatedUnit <= 0 {
+		return FundEstimateSnapshot{}, false
+	}
+
+	return FundEstimateSnapshot{
+		Code:          code,
+		Name:          strings.TrimSpace(name),
+		TradeDate:     tradeDate,
+		EstimateTime:  candidate.EstimateTime,
+		EstimatedUnit: estimatedUnit,
+		EstimatedRate: &estimatedRate,
+		Source:        "ai_corrected",
+	}, true
+}
+
+func selectAICorrectedCandidate(tradeDate string, sources []string, latestByDateSource map[string]FundEstimateSnapshot, actualRates map[string]float64, category string) (aiEstimateCandidate, bool) {
+	sourceScores := estimateSourceScoresFromSnapshots(sources, actualRates, latestByDateSource, "")
+	targetCandidates := buildAIEstimateCandidatesForDate(tradeDate, sources, latestByDateSource, sourceScores, category)
+	if len(targetCandidates) == 0 {
+		return aiEstimateCandidate{}, false
+	}
+
+	walkScores := walkForwardAIEstimateModelScores(tradeDate, sources, latestByDateSource, actualRates, category)
+	bestRaw, bestRawScore, hasRaw := bestRawAIEstimateCandidate(sources, targetCandidates, walkScores, sourceScores)
+	if !hasRaw {
+		return aiEstimateCandidate{}, false
+	}
+
+	selected := bestRaw
+	selectedScore := bestRawScore
+	minImprovement := 0.015
+	if bestRawScore.MAE > 0.4 {
+		minImprovement = bestRawScore.MAE * 0.08
+	}
+	for name, candidate := range targetCandidates {
+		if candidate.Raw {
+			continue
+		}
+		if strings.HasPrefix(name, "linear:") {
+			sourceScore := sourceScores[candidate.Source]
+			if sourceScore.Samples >= 10 && sourceScore.LinearMAE+minImprovement < bestRawScore.MAE {
+				if selected.Raw || sourceScore.LinearMAE < selectedScore.MAE {
+					selected = candidate
+					selectedScore = aiEstimateModelScore{MAE: sourceScore.LinearMAE, Samples: sourceScore.Samples}
+				}
+			}
+			continue
+		}
+		score, ok := walkScores[name]
+		if !ok || score.Samples < 4 {
+			continue
+		}
+		if bestRawScore.Samples > 0 && score.MAE+minImprovement >= bestRawScore.MAE {
+			continue
+		}
+		if selected.Raw || selectedScore.Samples == 0 || score.MAE < selectedScore.MAE {
+			selected = candidate
+			selectedScore = score
+		}
+	}
+	return selected, true
+}
+
+func buildAIEstimateCandidatesForDate(tradeDate string, sources []string, latestByDateSource map[string]FundEstimateSnapshot, sourceScores map[string]fundEstimateSourceScore, category string) map[string]aiEstimateCandidate {
+	result := make(map[string]aiEstimateCandidate)
+	for _, source := range sources {
+		source = canonicalAIEstimateSource(source)
+		snapshot, ok := latestByDateSource[tradeDate+"|"+source]
+		if !ok || snapshot.EstimatedRate == nil || snapshot.EstimatedUnit <= 0 {
+			continue
+		}
+		rawRate := *snapshot.EstimatedRate
+		result["raw:"+source] = aiEstimateCandidate{
+			Name:         "raw:" + source,
+			Source:       source,
+			Rate:         rawRate,
+			Unit:         snapshot.EstimatedUnit,
+			EstimateTime: snapshot.EstimateTime,
+			Raw:          true,
+		}
+
+		score := sourceScores[source]
+		if score.Samples >= 3 {
+			correctedRate := rawRate - shrunkenAIEstimateBias(score, category)
+			maxCorrection := aiCorrectedMaxCorrection(category, score)
+			correctedRate = clampFundEstimateRate(correctedRate, rawRate-maxCorrection, rawRate+maxCorrection)
+			result["corrected:"+source] = aiEstimateCandidate{
+				Name:         "corrected:" + source,
+				Source:       source,
+				Rate:         correctedRate,
+				Unit:         snapshot.EstimatedUnit,
+				EstimateTime: snapshot.EstimateTime,
+			}
+		}
+		if score.Samples >= 10 && score.MAE >= 0.25 && score.LinearMAE < score.MAE*0.9 && score.Slope != 0 && absFloat64(score.Slope) <= 4 {
+			linearRate := score.Intercept + score.Slope*rawRate
+			maxCorrection := aiCorrectedMaxCorrection(category, score)
+			linearRate = clampFundEstimateRate(linearRate, rawRate-maxCorrection, rawRate+maxCorrection)
+			result["linear:"+source] = aiEstimateCandidate{
+				Name:         "linear:" + source,
+				Source:       source,
+				Rate:         linearRate,
+				Unit:         snapshot.EstimatedUnit,
+				EstimateTime: snapshot.EstimateTime,
+			}
+		}
+	}
+	if ensemble, ok := buildAIEnsembleCandidateForDate(tradeDate, sources, latestByDateSource, sourceScores, category); ok {
+		result[ensemble.Name] = ensemble
+	}
+	return result
+}
+
+func buildAIEnsembleCandidateForDate(tradeDate string, sources []string, latestByDateSource map[string]FundEstimateSnapshot, sourceScores map[string]fundEstimateSourceScore, category string) (aiEstimateCandidate, bool) {
+	totalWeight := 0.0
+	weightedRate := 0.0
+	weightedUnit := 0.0
+	latestEstimateTime := ""
+	rawMin := 0.0
+	rawMax := 0.0
+	hasRawRange := false
+
+	for _, source := range sources {
+		source = canonicalAIEstimateSource(source)
+		snapshot, ok := latestByDateSource[tradeDate+"|"+source]
+		if !ok || snapshot.EstimatedRate == nil || snapshot.EstimatedUnit <= 0 {
+			continue
+		}
+		score := sourceScores[source]
+		if score.Samples < 3 {
+			continue
+		}
+		weight := aiCorrectedSourceWeight(source, category, score)
+		if weight <= 0 {
+			continue
+		}
+		rawRate := *snapshot.EstimatedRate
+		correctedRate := rawRate - shrunkenAIEstimateBias(score, category)
+		weightedRate += correctedRate * weight
+		weightedUnit += snapshot.EstimatedUnit * weight
+		totalWeight += weight
+		if latestEstimateTime == "" || snapshot.EstimateTime > latestEstimateTime {
+			latestEstimateTime = snapshot.EstimateTime
+		}
+		if !hasRawRange {
+			rawMin = rawRate
+			rawMax = rawRate
+			hasRawRange = true
+		} else {
+			if rawRate < rawMin {
+				rawMin = rawRate
+			}
+			if rawRate > rawMax {
+				rawMax = rawRate
+			}
+		}
+	}
+
+	if totalWeight <= 0 || latestEstimateTime == "" {
+		return aiEstimateCandidate{}, false
+	}
+	estimatedRate := weightedRate / totalWeight
+	if hasRawRange {
+		maxCorrection := aiCorrectedMaxCorrection(category, fundEstimateSourceScore{MAE: absFloat64(rawMax - rawMin)})
+		estimatedRate = clampFundEstimateRate(estimatedRate, rawMin-maxCorrection, rawMax+maxCorrection)
+	}
+	return aiEstimateCandidate{
+		Name:         "ensemble",
+		Source:       "ensemble",
+		Rate:         estimatedRate,
+		Unit:         weightedUnit / totalWeight,
+		EstimateTime: latestEstimateTime,
+	}, true
+}
+
+func walkForwardAIEstimateModelScores(targetDate string, sources []string, latestByDateSource map[string]FundEstimateSnapshot, actualRates map[string]float64, category string) map[string]aiEstimateModelScore {
+	type acc struct {
+		sum   float64
+		count int
+	}
+	accByModel := make(map[string]acc)
+	dates := make([]string, 0, len(actualRates))
+	for date := range actualRates {
+		if targetDate != "" && date >= targetDate {
+			continue
+		}
+		dates = append(dates, date)
+	}
+	sort.Strings(dates)
+	for _, date := range dates {
+		actualRate, ok := actualRates[date]
+		if !ok {
+			continue
+		}
+		sourceScores := estimateSourceScoresFromSnapshots(sources, actualRates, latestByDateSource, date)
+		candidates := buildAIEstimateCandidatesForDate(date, sources, latestByDateSource, sourceScores, category)
+		for name, candidate := range candidates {
+			item := accByModel[name]
+			item.sum += absFloat64(candidate.Rate - actualRate)
+			item.count++
+			accByModel[name] = item
+		}
+	}
+	result := make(map[string]aiEstimateModelScore, len(accByModel))
+	for name, item := range accByModel {
+		if item.count == 0 {
+			continue
+		}
+		result[name] = aiEstimateModelScore{
+			MAE:     item.sum / float64(item.count),
+			Samples: item.count,
+		}
+	}
+	return result
+}
+
+func bestRawAIEstimateCandidate(sources []string, candidates map[string]aiEstimateCandidate, walkScores map[string]aiEstimateModelScore, sourceScores map[string]fundEstimateSourceScore) (aiEstimateCandidate, aiEstimateModelScore, bool) {
+	var best aiEstimateCandidate
+	bestScore := aiEstimateModelScore{MAE: 999, Samples: 0}
+	hasBest := false
+	for _, source := range sources {
+		source = canonicalAIEstimateSource(source)
+		candidate, ok := candidates["raw:"+source]
+		if !ok {
+			continue
+		}
+		score, ok := walkScores[candidate.Name]
+		if !ok {
+			rawScore := sourceScores[source]
+			score = aiEstimateModelScore{MAE: rawScore.MAE, Samples: rawScore.Samples}
+		}
+		if !hasBest || score.Samples > 0 && (bestScore.Samples == 0 || score.MAE < bestScore.MAE) {
+			best = candidate
+			bestScore = score
+			hasBest = true
+		}
+	}
+	if hasBest {
+		return best, bestScore, true
+	}
+	for _, source := range sources {
+		source = canonicalAIEstimateSource(source)
+		if candidate, ok := candidates["raw:"+source]; ok {
+			return candidate, aiEstimateModelScore{}, true
+		}
+	}
+	return aiEstimateCandidate{}, aiEstimateModelScore{}, false
+}
+
+func aiCorrectedCurrentSources() []string {
+	return []string{"eastmoney_js", "eastmoney_mobile", "danjuan_position"}
+}
+
+func aiCorrectedHistorySources() []string {
+	return []string{"eastmoney_js", "eastmoney_mobile", "danjuan_position"}
+}
+
+func canonicalAIEstimateSource(source string) string {
+	source = NormalizeFundEstimateSource(source)
+	if source == "eastmoney" {
+		return "eastmoney_js"
+	}
+	return source
+}
+
+func shrunkenAIEstimateBias(score fundEstimateSourceScore, category string) float64 {
+	if score.Samples < 3 {
+		return 0
+	}
+	shrink := float64(score.Samples) / float64(score.Samples+4)
+	maxCorrection := aiCorrectedMaxCorrection(category, score)
+	return clampFundEstimateRate(score.Bias*shrink, -maxCorrection, maxCorrection)
+}
+
+func aiCorrectedMaxCorrection(category string, score fundEstimateSourceScore) float64 {
+	if score.MAE > 0.45 {
+		return mathutil.RoundToFloat(clampFundEstimateRate(score.MAE*2.2, 0.8, 3.5), 2)
+	}
+	switch category {
+	case "stable":
+		return 0.12
+	case "equity":
+		return 0.8
+	default:
+		return 0.45
+	}
+}
+
+func aiCorrectedSourceWeight(source string, category string, score fundEstimateSourceScore) float64 {
+	mae := score.MAE
+	if mae <= 0 {
+		mae = 0.08
+	}
+	weight := 1 / (mae + 0.08)
+	if score.Samples == 0 {
+		weight *= 0.35
+	} else if score.Samples < 3 {
+		weight *= 0.65
+	}
+
+	switch category {
+	case "stable":
+		if source == "eastmoney_js" || source == "eastmoney_mobile" {
+			weight *= 1.25
+		}
+		if source == "danjuan_position" {
+			weight *= 0.55
+		}
+	case "equity":
+		if source == "danjuan_position" {
+			weight *= 1.18
+		}
+	}
+	return weight
+}
+
+func inferAICorrectedFundCategory(text string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(text))
+	switch {
+	case strings.Contains(normalized, "货币"), strings.Contains(normalized, "现金"), strings.Contains(normalized, "同业存单"),
+		strings.Contains(normalized, "债"), strings.Contains(normalized, "BOND"), strings.Contains(normalized, "CASH"):
+		return "stable"
+	case strings.Contains(normalized, "股票"), strings.Contains(normalized, "混合"), strings.Contains(normalized, "指数"),
+		strings.Contains(normalized, "ETF"), strings.Contains(normalized, "QDII"), strings.Contains(normalized, "FOF"),
+		strings.Contains(normalized, "STOCK"), strings.Contains(normalized, "EQUITY"):
+		return "equity"
+	default:
+		return "other"
+	}
+}
+
+func defaultLabelForFundEstimate(primary string, fallback string) string {
+	primary = strings.TrimSpace(primary)
+	if primary != "" {
+		return primary
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func clampFundEstimateRate(value float64, low float64, high float64) float64 {
+	if low > high {
+		return value
+	}
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
+}
+
+func absFloat64(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func (f *FundApi) crawlFundNetEstimatedUnitFromEastmoneyJS(code string) {
 	var fundNetUnitValue FundNetUnitValue
 	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36").
@@ -1278,51 +2353,179 @@ func (f *FundApi) CrawlFundNetEstimatedUnit(code string) {
 				fund.NetEstimatedRate = &netEstimatedRate
 			}
 			db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
-			f.saveFundEstimateSnapshot(fund.Code, fund.Name, fund.NetEstimatedTime, fund.NetEstimatedUnit, fund.NetEstimatedRate)
+			f.saveFundEstimateSnapshotWithSource(fund.Code, fund.Name, fund.NetEstimatedTime, fund.NetEstimatedUnit, fund.NetEstimatedRate, "eastmoney_js")
 		}
 	}
 }
 
+func (f *FundApi) crawlFundNetEstimatedUnitFromEastmoneyMobile(code string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return
+	}
+	var mobileResp fundMobileEstimateResponse
+	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", "https://fund.eastmoney.com/").
+		SetFormData(map[string]string{
+			"pageIndex": "1",
+			"pageSize":  "1",
+			"appType":   "ttjj",
+			"product":   "EFund",
+			"plat":      "Android",
+			"Version":   "6.2.4",
+			"deviceid":  "9e16077fca2fcr78ep0ltn98",
+			"Fcodes":    code,
+		}).
+		Post("https://fundmobapi.eastmoney.com/FundMNewApi/FundMNFInfo")
+	if err != nil {
+		logger.SugaredLogger.Errorf("crawl mobile fund estimate failed for %s: %v", code, err)
+		return
+	}
+	if response.StatusCode() != 200 {
+		return
+	}
+	if err := json.Unmarshal(response.Body(), &mobileResp); err != nil || len(mobileResp.Datas) == 0 {
+		return
+	}
+	item := mobileResp.Datas[0]
+	itemCode := strings.TrimSpace(item.Code)
+	if itemCode == "" {
+		itemCode = code
+	}
+	fund := &FollowedFund{
+		Code:             itemCode,
+		Name:             item.Name,
+		NetEstimatedTime: item.NetEstimatedTime,
+	}
+	netEstimatedUnit, err := convertor.ToFloat(item.NetEstimatedUnit)
+	if err == nil && netEstimatedUnit > 0 {
+		fund.NetEstimatedUnit = &netEstimatedUnit
+	}
+	netEstimatedRate, err := convertor.ToFloat(item.NetEstimatedRate)
+	if err == nil {
+		fund.NetEstimatedRate = &netEstimatedRate
+	}
+	if fund.NetEstimatedUnit == nil || strings.TrimSpace(fund.NetEstimatedTime) == "" {
+		logger.SugaredLogger.Warnf("mobile fund estimate is empty for %s", code)
+		return
+	}
+	db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
+	f.saveFundEstimateSnapshotWithSource(fund.Code, fund.Name, fund.NetEstimatedTime, fund.NetEstimatedUnit, fund.NetEstimatedRate, "eastmoney_mobile")
+}
+
+func (f *FundApi) crawlFundNetEstimatedUnitFromDanjuanPosition(code string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return
+	}
+	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36").
+		SetHeader("Referer", "https://danjuanapp.com/").
+		Get(fmt.Sprintf("https://danjuanapp.com/djapi/fund/detail/%s", code))
+	if err != nil {
+		logger.SugaredLogger.Errorf("crawl danjuan fund detail failed for %s: %v", code, err)
+		return
+	}
+	if response.StatusCode() != 200 {
+		return
+	}
+	var detail danjuanFundDetailResponse
+	if err := json.Unmarshal(response.Body(), &detail); err != nil || len(detail.Data.FundPosition.StockList) == 0 {
+		return
+	}
+	estimatedRate := 0.0
+	for _, stock := range detail.Data.FundPosition.StockList {
+		estimatedRate += stock.Percent * stock.ChangePercentage / 100
+	}
+
+	var followed FollowedFund
+	if err := db.Dao.Where("code = ?", code).First(&followed).Error; err != nil {
+		return
+	}
+	if followed.NetUnitValue == nil || *followed.NetUnitValue <= 0 {
+		return
+	}
+	estimatedUnit := mathutil.RoundToFloat(*followed.NetUnitValue*(1+estimatedRate/100), 4)
+	estimatedRate = mathutil.RoundToFloat(estimatedRate, 2)
+	estimateTime := time.Now().Format("2006-01-02 15:04")
+	fund := &FollowedFund{
+		Code:             code,
+		Name:             followed.Name,
+		NetEstimatedTime: estimateTime,
+		NetEstimatedUnit: &estimatedUnit,
+		NetEstimatedRate: &estimatedRate,
+	}
+	db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
+	f.saveFundEstimateSnapshotWithSource(fund.Code, fund.Name, fund.NetEstimatedTime, fund.NetEstimatedUnit, fund.NetEstimatedRate, "danjuan_position")
+}
+
 // CrawlFundNetUnitValue fetches latest confirmed net unit value data.
 func (f *FundApi) CrawlFundNetUnitValue(code string) {
-	//	var fundNetUnitValue FundNetUnitValue
+	confirmed, err := f.GetFundConfirmedNetUnitValue(code)
+	if err != nil {
+		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		return
+	}
+	if confirmed == nil {
+		return
+	}
+	fund := &FollowedFund{
+		Name:             confirmed.Name,
+		Code:             confirmed.Code,
+		NetUnitValue:     &confirmed.UnitValue,
+		NetUnitValueDate: confirmed.Date,
+	}
+	db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
+}
+
+func (f *FundApi) GetFundConfirmedNetUnitValue(code string) (*FundConfirmedNetUnit, error) {
 	url := fmt.Sprintf("http://hq.sinajs.cn/rn=%d&list=f_%s", time.Now().UnixMilli(), code)
-	//logger.SugaredLogger.Infof("url:%s", url)
 	response, err := f.client.SetTimeout(time.Duration(f.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "hq.sinajs.cn").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		SetHeader("Referer", "https://finance.sina.com.cn").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
-		return
+		return nil, err
 	}
-	if response.StatusCode() == 200 {
-		data := string(GB18030ToUTF8(response.Body()))
-		//logger.SugaredLogger.Infof("data:%s", data)
-		datas := strutil.SplitAndTrim(data, "=", "\"")
-		if len(datas) >= 2 {
-			//codex := strings.Split(datas[0], "hq_str_f_")[1]
-			parts := strutil.SplitAndTrim(datas[1], ",", "\"")
-			//logger.SugaredLogger.Infof("parts:%s", parts)
-			val, err := convertor.ToFloat(parts[1])
-			if err != nil {
-				logger.SugaredLogger.Errorf("err:%s", err.Error())
-				return
-			}
-			fund := &FollowedFund{
-				Name:             parts[0],
-				Code:             code,
-				NetUnitValue:     &val,
-				NetUnitValueDate: parts[4],
-			}
-			db.Dao.Model(fund).Where("code=?", fund.Code).Updates(fund)
-		}
-
+	if response.StatusCode() != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", response.StatusCode())
 	}
+	raw := string(GB18030ToUTF8(response.Body()))
+	datas := strutil.SplitAndTrim(raw, "=", "\"")
+	if len(datas) < 2 {
+		return nil, fmt.Errorf("invalid sina fund quote for %s", code)
+	}
+	parts := strutil.SplitAndTrim(datas[1], ",", "\"")
+	if len(parts) < 5 {
+		return nil, fmt.Errorf("invalid sina fund quote parts for %s", code)
+	}
+	unitValue, err := convertor.ToFloat(parts[1])
+	if err != nil {
+		return nil, err
+	}
+	previousUnit, _ := convertor.ToFloat(parts[3])
+	var dailyReturn *float64
+	if previousUnit > 0 {
+		value := mathutil.RoundToFloat((unitValue/previousUnit-1)*100, 2)
+		dailyReturn = &value
+	}
+	return &FundConfirmedNetUnit{
+		Name:         parts[0],
+		Code:         code,
+		UnitValue:    unitValue,
+		PreviousUnit: previousUnit,
+		Date:         parts[4],
+		DailyReturn:  dailyReturn,
+	}, nil
 }
 
 func (f *FundApi) saveFundEstimateSnapshot(code string, name string, estimateTime string, estimatedUnit *float64, estimatedRate *float64) {
+	f.saveFundEstimateSnapshotWithSource(code, name, estimateTime, estimatedUnit, estimatedRate, "eastmoney")
+}
+
+func (f *FundApi) saveFundEstimateSnapshotWithSource(code string, name string, estimateTime string, estimatedUnit *float64, estimatedRate *float64, source string) {
 	code = strings.TrimSpace(code)
 	estimateTime = strings.TrimSpace(estimateTime)
 	if code == "" || estimateTime == "" || estimatedUnit == nil {
@@ -1336,11 +2539,14 @@ func (f *FundApi) saveFundEstimateSnapshot(code string, name string, estimateTim
 		EstimateTime:  estimateTime,
 		EstimatedUnit: *estimatedUnit,
 		EstimatedRate: estimatedRate,
-		Source:        "eastmoney",
+		Source:        strings.TrimSpace(source),
+	}
+	if snapshot.Source == "" {
+		snapshot.Source = "eastmoney"
 	}
 
 	var existing FundEstimateSnapshot
-	err := db.Dao.Where("code = ? AND estimate_time = ?", snapshot.Code, snapshot.EstimateTime).First(&existing).Error
+	err := db.Dao.Where("code = ? AND estimate_time = ? AND source = ?", snapshot.Code, snapshot.EstimateTime, snapshot.Source).First(&existing).Error
 	switch err {
 	case nil:
 		db.Dao.Model(&existing).Updates(snapshot)

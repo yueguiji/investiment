@@ -188,7 +188,7 @@ function handleSearch() {
   if (!loadingRef.value) {
     loadingRef.value = true
     query({
-      page: 1,
+      page: paginationReactive?.page ?? 1,
       pageSize: paginationReactive.pageSize,
       order: "desc",
       keyword: paginationReactive.keyword,
@@ -196,7 +196,7 @@ function handleSearch() {
       endDate: formatDate(paginationReactive.range[1])
     }).then((data) => {
       dataRef.value = data.data
-      paginationReactive.page = 1
+      paginationReactive.page = data.page
       paginationReactive.pageCount = data.pageCount
       paginationReactive.itemCount = data.total
       loadingRef.value = false
@@ -287,10 +287,10 @@ function deleteAIResponseResult(id){
 
 
 
-  <n-modal transform-origin="center" v-model:show="editorDataRef.show" preset="card" style="width: 800px;"
+  <n-modal transform-origin="center" v-model:show="editorDataRef.show" preset="card" style="width: 800px;max-width: calc(100vw - 32px);"
            :title="'['+editorDataRef.stockName+']AI分析'">
     <n-spin size="small" :show="editorDataRef.loading">
-      <MdPreview  ref="mdPreviewRef" style="height: 540px;text-align: left"
+      <MdPreview  ref="mdPreviewRef" style="height: 540px;max-height: 60vh;text-align: left;overflow-y: auto;"
                  :modelValue="editorDataRef.content" :theme="theme"/>
     </n-spin>
     <template #footer>

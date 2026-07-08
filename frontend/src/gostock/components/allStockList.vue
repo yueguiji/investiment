@@ -1,14 +1,16 @@
-﻿<script setup>
-import {h, onBeforeMount, onMounted, ref, reactive} from 'vue'
+<script setup>
+import {h, onBeforeMount, onMounted, ref, reactive, watch, computed} from 'vue'
 import {
   GetAllStockInfoList,
   GetAllStocks,
-  GetConfig, GetSponsorInfo
+  GetConfig, GetSponsorInfo, GetEffectiveSponsorVip, Follow, GetGroupList, AddStockGroup, AddGroup
 } from "../../../wailsjs/go/main/App";
-import {NButton, NInput, NTag, NText, useMessage, useNotification, NDataTable, NSpace, NPagination} from "naive-ui";
+import {NButton, NInput, NTag, NText, useMessage, useNotification, NDataTable, NSpace, NPagination, NDropdown, NIcon} from "naive-ui";
 import sparkLine from "./stockSparkLine.vue"
 import klineChart from "./KLineChart.vue"
 import KLineChart from "./KLineChart.vue";
+import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
+import {FolderOpenOutline, AddOutline} from "@vicons/ionicons5";
 import {format} from "date-fns";
 
 const notify = useNotification()
@@ -48,6 +50,7 @@ onBeforeMount(() => {
 onMounted(() => {
   console.log('stock-list mounted')
   loadStocks(1, paginationReactive.pageSize)
+  loadGroupList()
 })
 
 const dataRef = ref([])
@@ -57,6 +60,132 @@ const vipStartTime=ref("");
 const vipEndTime=ref("");
 const expired=ref(false)
 const isValidVip=ref(false) // 是否是会员
+
+// 多周期 K 线（VIP2）
+const effectiveVipLevel = ref(0)
+const multiKlineModalShow = ref(false)
+const multiKlineCode = ref('')
+const multiKlineName = ref('')
+
+async function refreshEffectiveVip() {
+  try {
+    const r = await GetEffectiveSponsorVip()
+    const active = !!r?.active
+    const lvl = Number(r?.vipLevel ?? 0)
+    effectiveVipLevel.value = active && !Number.isNaN(lvl) ? lvl : 0
+  } catch (_) {
+    effectiveVipLevel.value = 0
+  }
+}
+
+function toEastMoneyCodeFromSecucode(secucode) {
+  if (!secucode) return ''
+  const c = String(secucode).trim()
+  if (/\.(SH|SZ|BJ|HK|US|SS)$/i.test(c)) return c.toUpperCase()
+  const lower = c.toLowerCase()
+  if (lower.startsWith('sh')) return lower.slice(2) + '.SH'
+  if (lower.startsWith('sz')) return lower.slice(2) + '.SZ'
+  if (lower.startsWith('bj')) return lower.slice(2) + '.BJ'
+  if (lower.startsWith('hk')) return lower.slice(2).toUpperCase() + '.HK'
+  if (lower.startsWith('us')) return lower.slice(2).toUpperCase() + '.US'
+  return c.toUpperCase()
+}
+
+async function showMultiKline(row) {
+  const em = toEastMoneyCodeFromSecucode(row.SECUCODE)
+  if (!em) {
+    message.warning('当前代码暂不支持多周期K线图')
+    return
+  }
+  await refreshEffectiveVip()
+  if (effectiveVipLevel.value < 2) {
+    message.warning('多周期 K 线仅限 VIP2 及以上用户使用，您当前权限不足')
+    return
+  }
+  multiKlineCode.value = em
+  multiKlineName.value = row.SECURITY_NAME_ABBR || ''
+  multiKlineModalShow.value = true
+}
+
+// 关注分组选择
+const groupList = ref([])
+const showFollowGroupModal = ref(false)
+const newGroupName = ref('')
+const pendingFollowRow = ref(null)
+
+const followGroupOptions = computed(() => {
+  const opts = [{label: '默认（不分组）', key: 0}]
+  groupList.value.forEach(g => opts.push({label: g.name, key: g.ID}))
+  opts.push({type: 'divider', key: 'divider'})
+  opts.push({label: '新建分组', key: 'new', icon: () => h(NIcon, null, {default: () => h(AddOutline)})})
+  return opts
+})
+
+function loadGroupList() {
+  GetGroupList().then(res => {
+    groupList.value = res || []
+  }).catch(() => {})
+}
+
+function handleFollowSelect(key, row) {
+  if (key === 'new') {
+    pendingFollowRow.value = row
+    newGroupName.value = ''
+    showFollowGroupModal.value = true
+    return
+  }
+  doFollow(row, Number(key))
+}
+
+function doFollow(row, groupId) {
+  let code = getStockCode(row.SECUCODE)
+  Follow(code).then(result => {
+    if (result === '关注成功') {
+      message.success(groupId > 0 ? `已关注，并加入分组「${groupNameById(groupId)}」` : '关注成功')
+    } else {
+      message.info(result)
+    }
+    if (groupId > 0) {
+      AddStockGroup(groupId, code).then(() => {
+        loadGroupList()
+      }).catch(() => {})
+    }
+  }).catch(err => {
+    message.error('关注失败: ' + err)
+  })
+}
+
+function groupNameById(id) {
+  const g = groupList.value.find(item => item.ID === id)
+  return g ? g.name : ''
+}
+
+function handleCreateGroupAndFollow() {
+  const name = newGroupName.value.trim()
+  if (!name) {
+    message.warning('请输入分组名称')
+    return
+  }
+  const maxSort = groupList.value.reduce((max, g) => Math.max(max, g.sort || 0), 0)
+  AddGroup({name, sort: maxSort + 1}).then(res => {
+    if (res === '添加成功') {
+      GetGroupList().then(list => {
+        groupList.value = list || []
+        showFollowGroupModal.value = false
+        const created = groupList.value.find(g => g.name === name)
+        if (created && pendingFollowRow.value) {
+          doFollow(pendingFollowRow.value, created.ID)
+        }
+        pendingFollowRow.value = null
+      })
+    } else {
+      message.error(res)
+    }
+  }).catch(err => {
+    message.error('新建分组失败: ' + err)
+  })
+}
+
 const columnsRef = ref([
   // {
   //   title: '数据时间',
@@ -236,6 +365,40 @@ const columnsRef = ref([
             onClick: () => showKline(row)
           },
           { default: () => '日K' }
+      ), h(
+          NButton,
+          {
+            secondary: true,
+            size: 'small',
+            type: 'primary',
+            style: 'margin-left: 4px;',
+            onClick: () => showMultiKline(row)
+          },
+          { default: () => '多周期' }
+      ), h(
+          NDropdown,
+          {
+            trigger: 'click',
+            options: followGroupOptions.value,
+            placement: 'bottom-end',
+            menuProps: () => ({ style: 'max-height:300px; overflow-y:auto;' }),
+            onSelect: (key) => handleFollowSelect(key, row)
+          },
+          {
+            default: () => h(
+                NButton,
+                {
+                  tertiary: true,
+                  size: 'small',
+                  type: 'success',
+                  style: 'margin-left: 4px;',
+                },
+                {
+                  default: () => '关注',
+                  icon: () => h(NIcon, null, {default: () => h(FolderOpenOutline, {size: 14})})
+                }
+            )
+          }
       ),]
     }
   },
@@ -245,7 +408,7 @@ const paginationReactive = reactive({
   keyword:"",
   page: 1,
   pageCount: 1,
-  pageSize: 10,
+  pageSize: 9,
   itemCount: 0,
   prefix({ itemCount }) {
     return `${itemCount} 只股票`
@@ -383,6 +546,10 @@ const technicalIndicatorReactive = reactive({
   BLACK_CLOUD_TOPS: false,
   MORNING_STAR: false,
   NARROW_FINISH: false,
+  UPP_DAYS:0,
+  CONCERN_RANK_7DAYS:0,
+  UPNDAY:0,
+  DOWNNDAY :0,
 })
 
 function handleReset(){
@@ -426,6 +593,10 @@ function handleReset(){
   technicalIndicatorReactive.BLACK_CLOUD_TOPS=false
   technicalIndicatorReactive.MORNING_STAR=false
   technicalIndicatorReactive.NARROW_FINISH=false
+  technicalIndicatorReactive.UPP_DAYS=0
+  technicalIndicatorReactive.CONCERN_RANK_7DAYS=0
+  technicalIndicatorReactive.UPNDAY=0
+  technicalIndicatorReactive.DOWNNDAY=0
 }
 
 // 判断是否是数字
@@ -445,9 +616,9 @@ const toNumber = (value, defaultValue = 0) => {
 </script>
 
 <template>
-  <div>
     <n-space justify="start">
-      <n-checkbox   @update:checked="handleCheckedChange" v-model:checked="technicalIndicatorReactive.MACD_GOLDEN_FORK">
+      <n-card size="small" :bordered="false"  style="text-align: left">
+        <n-checkbox   @update:checked="handleCheckedChange" v-model:checked="technicalIndicatorReactive.MACD_GOLDEN_FORK">
         MACD金叉
       </n-checkbox>
       <n-checkbox  @update:checked="handleCheckedChange"    v-model:checked="technicalIndicatorReactive.KDJ_GOLDEN_FORK">
@@ -537,6 +708,35 @@ const toNumber = (value, defaultValue = 0) => {
       <n-checkbox  @update:checked="handleCheckedChange"    v-model:checked="technicalIndicatorReactive.NARROW_FINISH">
         窄幅整理
       </n-checkbox>
+      </n-card>
+      <n-card size="small" :bordered="false"  style="text-align: left">
+        <n-radio-group size="small"  @update:checked="handleCheckedChange" name="UPP_DAYS"   v-model:value="technicalIndicatorReactive.UPP_DAYS">
+          <n-radio :value="3">人气排名连涨:3天及以上</n-radio>
+          <n-radio :value="5">人气排名连涨:5天及以上</n-radio>
+          <n-radio :value="7">人气排名连涨:7天及以上</n-radio>
+        </n-radio-group>
+        <n-divider vertical/>
+        <n-radio-group  size="small" @update:checked="handleCheckedChange"  name="CONCERN_RANK_7DAYS"  v-model:value="technicalIndicatorReactive.CONCERN_RANK_7DAYS">
+          <n-radio :value="10"> 7日关注排名:前10名</n-radio>
+          <n-radio :value="50"> 7日关注排名:前50名</n-radio>
+          <n-radio :value="100"> 7日关注排名:前100名</n-radio>
+        </n-radio-group>
+
+        <n-radio-group  size="small" @update:checked="handleCheckedChange" name="UPNDAY"  v-model:value="technicalIndicatorReactive.UPNDAY">
+          <n-radio :value="3"> 连涨天数:3天及以上</n-radio>
+          <n-radio :value="5"> 连涨天数:5天及以上</n-radio>
+          <n-radio :value="8"> 连涨天数:8天及以上</n-radio>
+        </n-radio-group>
+        <n-divider vertical/>
+        <n-radio-group  size="small" @update:checked="handleCheckedChange" name="DOWNNDAY"  v-model:value="technicalIndicatorReactive.DOWNNDAY">
+          <n-radio :value="3"> 连跌天数:3天及以上</n-radio>
+          <n-radio :value="5"> 连跌天数:5天及以上</n-radio>
+          <n-radio :value="8"> 连跌天数:8天及以上</n-radio>
+          <n-radio :value="10"> 连跌天数:10天及以上</n-radio>
+          <n-radio :value="14"> 连跌天数:14天及以上</n-radio>
+        </n-radio-group>
+      </n-card>
+
     </n-space>
     <n-input-group>
 <!--    <n-input clearable placeholder="输入股票名称" v-model:value="paginationReactive.keyword"/>-->
@@ -570,10 +770,10 @@ const toNumber = (value, defaultValue = 0) => {
       :pagination="paginationReactive"
       :row-key="(rowData) => rowData.SECUCODE"
       flex-height
-      style="height: calc(100vh - 300px);margin-top: 10px"
+      style="height: calc(100vh - 380px);margin-top: 10px"
       @update:page="handlePageChange"
     />
-    
+
     <!-- 分页控件 -->
 <!--    <div style="margin-top: 16px; display: flex; justify-content: center;">-->
 <!--      <n-pagination-->
@@ -588,12 +788,43 @@ const toNumber = (value, defaultValue = 0) => {
 <!--        @update:page-size="handlePageSizeChange"-->
 <!--      />-->
 <!--    </div>-->
-  </div>
 
-  <n-modal v-model:show="modalDataRef.visible" :title="modalDataRef.title" preset="card" style="width: 850px;">
+  <n-modal v-model:show="modalDataRef.visible" :title="modalDataRef.title" preset="card" style="width: 850px;max-width: calc(100vw - 32px);">
     <n-card size="small">
-      <KLineChart style="width: 800px" :code="getStockCode(modalDataRef.stockCode)" :chart-height="500" :stock-name="modalDataRef.stockName" :k-days="30" :dark-theme="editorDataRef.darkTheme"></KLineChart>
+      <KLineChart style="width: 100%;max-width: 800px;" :code="getStockCode(modalDataRef.stockCode)" :chart-height="500" :stock-name="modalDataRef.stockName" :k-days="30" :dark-theme="editorDataRef.darkTheme"></KLineChart>
     </n-card>
+  </n-modal>
+
+  <n-modal
+    v-model:show="multiKlineModalShow"
+    :title="(multiKlineName || '') + ' — 多周期K线'"
+    preset="card"
+    style="width: min(1100px, 96vw); max-width: 96vw; box-sizing: border-box"
+    :content-style="{
+      maxHeight: 'min(85vh, 820px)',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      minWidth: 0,
+      boxSizing: 'border-box',
+    }"
+  >
+    <StockLightweightKlineChart
+      v-if="multiKlineModalShow && multiKlineCode"
+      :key="'allstock-' + multiKlineCode"
+      :code="multiKlineCode"
+      :stock-name="multiKlineName"
+      :dark-theme="editorDataRef.darkTheme"
+      :chart-height="500"
+    />
+  </n-modal>
+
+  <n-modal v-model:show="showFollowGroupModal" preset="dialog" title="新建分组" positive-text="创建并关注" negative-text="取消"
+           @positive-click="handleCreateGroupAndFollow" style="width: 420px;">
+    <n-form label-placement="left" label-width="80">
+      <n-form-item label="分组名称">
+        <n-input v-model:value="newGroupName" placeholder="请输入分组名称" @keyup.enter="handleCreateGroupAndFollow"/>
+      </n-form-item>
+    </n-form>
   </n-modal>
 </template>
 

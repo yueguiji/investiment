@@ -5,10 +5,19 @@ import {data} from '../models';
 import {portfolio} from '../models';
 import {quant} from '../models';
 import {asset} from '../models';
+import {context} from '../models';
+import {main} from '../models';
+import {lo} from '../models';
+
+export function AbortChatWithAgent():Promise<void>;
+
+export function AbortSummaryStockNews():Promise<void>;
 
 export function ActivateQuantTemplate(arg1:number):Promise<boolean>;
 
 export function AddAllStockInfo(arg1:models.AllStockInfo):Promise<string>;
+
+export function AddCronTask(arg1:data.FollowedStock):Promise<any>;
 
 export function AddGroup(arg1:data.Group):Promise<string>;
 
@@ -17,6 +26,8 @@ export function AddPrompt(arg1:models.PromptTemplate):Promise<string>;
 export function AddPromptTemplate(arg1:models.PromptTemplate):Promise<string>;
 
 export function AddStockGroup(arg1:number,arg2:string):Promise<string>;
+
+export function AddTradingRecord(arg1:data.TradingRecord):Promise<number>;
 
 export function AddTransaction(arg1:portfolio.Transaction):Promise<portfolio.Transaction>;
 
@@ -38,11 +49,21 @@ export function BuildQuantPrompt(arg1:quant.GenerateRequest):Promise<string>;
 
 export function BuildQuantScriptSearchLinks(arg1:string):Promise<Array<quant.SearchLink>>;
 
+export function CalculateNextRunTime(arg1:string):Promise<string>;
+
+export function CalculateNextRunTimes(arg1:string,arg2:number):Promise<Array<string>>;
+
 export function ChatWithAgent(arg1:string,arg2:number,arg3:any):Promise<void>;
 
 export function ChatWithHouseholdDigitalAnalysis(arg1:string,arg2:number,arg3:number,arg4:Array<asset.HouseholdChatMessage>):Promise<Record<string, any>>;
 
+export function CheckDeviceBinding(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function CheckFrequentTrading(arg1:string):Promise<Record<string, any>>;
+
 export function CheckSponsorCode(arg1:string):Promise<Record<string, any>>;
+
+export function CheckStockBaseInfo(arg1:context.Context):Promise<void>;
 
 export function CheckUpdate(arg1:number):Promise<string>;
 
@@ -53,6 +74,8 @@ export function CompareFunds(arg1:portfolio.FundCompareQuery):Promise<portfolio.
 export function CreateAsset(arg1:asset.Asset):Promise<asset.Asset>;
 
 export function CreateAssetCategory(arg1:asset.AssetCategory):Promise<asset.AssetCategory>;
+
+export function CreateCronTask(arg1:models.CronTask):Promise<string>;
 
 export function CreateHolding(arg1:portfolio.Holding):Promise<portfolio.Holding>;
 
@@ -68,9 +91,13 @@ export function CreateHouseholdMember(arg1:asset.HouseholdMember):Promise<asset.
 
 export function CreateHouseholdProtection(arg1:asset.HouseholdProtection):Promise<asset.HouseholdProtection>;
 
+export function CreateMCPServer(arg1:models.MCPServer):Promise<string>;
+
 export function CreateQuantCategory(arg1:quant.TemplateCategory):Promise<quant.TemplateCategory>;
 
 export function CreateQuantTemplate(arg1:quant.Template):Promise<quant.Template>;
+
+export function CreateSkill(arg1:models.Skill):Promise<string>;
 
 export function DelPrompt(arg1:number):Promise<string>;
 
@@ -81,6 +108,10 @@ export function DeleteAiRecommendStocks(arg1:number):Promise<string>;
 export function DeleteAllStockInfo(arg1:number):Promise<string>;
 
 export function DeleteAsset(arg1:number):Promise<boolean>;
+
+export function DeleteCronTask(arg1:number):Promise<string>;
+
+export function DeleteCustomStrategy(arg1:number):Promise<string>;
 
 export function DeleteFundWatchGroup(arg1:string):Promise<string>;
 
@@ -100,19 +131,43 @@ export function DeleteHouseholdMember(arg1:number):Promise<boolean>;
 
 export function DeleteHouseholdProtection(arg1:number):Promise<boolean>;
 
+export function DeleteMCPServer(arg1:number):Promise<string>;
+
 export function DeletePromptTemplate(arg1:number):Promise<string>;
 
 export function DeleteQuantTemplate(arg1:number):Promise<boolean>;
 
+export function DeleteSkill(arg1:number):Promise<string>;
+
 export function DeleteStockChangeHistory(arg1:number):Promise<string>;
+
+export function DeleteTradingRecord(arg1:number):Promise<void>;
 
 export function EMDictCode(arg1:string):Promise<Array<any>>;
 
+export function EnableCronTask(arg1:number,arg2:boolean):Promise<string>;
+
+export function EnableMCPServer(arg1:number,arg2:boolean):Promise<string>;
+
+export function EnableSkill(arg1:number,arg2:boolean):Promise<string>;
+
 export function EnsureFundUniverse():Promise<number>;
+
+export function ExecuteCronTaskNow(arg1:number):Promise<string>;
 
 export function ExportConfig():Promise<string>;
 
 export function ExportQuantTemplate(arg1:number):Promise<string>;
+
+export function FetchAiModelInfo(arg1:string,arg2:string,arg3:string):Promise<main.AiModelInfo>;
+
+export function FetchAiModels(arg1:string,arg2:string):Promise<Array<string>>;
+
+export function FetchAndSaveMarketStatistic():Promise<void>;
+
+export function FetchBKFundFlowNow():Promise<number>;
+
+export function FetchConceptFundFlowNow():Promise<number>;
 
 export function Follow(arg1:string):Promise<string>;
 
@@ -124,17 +179,31 @@ export function GetAIResponseResult(arg1:string):Promise<models.AIResponseResult
 
 export function GetAIResponseResultList(arg1:models.AIResponseResultQuery):Promise<models.AIResponseResultPageData>;
 
+export function GetAiAssistantSession(arg1:string):Promise<models.AiAssistantSessionResp>;
+
 export function GetAiConfigs():Promise<Array<data.AIConfig>>;
 
 export function GetAiRecommendStocksList(arg1:models.AiRecommendStocksQuery):Promise<models.AiRecommendStocksPageData>;
 
+export function GetAllBKCodes():Promise<Array<Record<string, string>>>;
+
+export function GetAllConceptCodes():Promise<Array<Record<string, string>>>;
+
 export function GetAllConcepts():Promise<Array<string>>;
+
+export function GetAllCustomStrategies():Promise<any>;
+
+export function GetAllGroupStocks():Promise<Array<data.GroupStock>>;
 
 export function GetAllHoldings():Promise<Array<portfolio.Holding>>;
 
 export function GetAllIndustries():Promise<Array<string>>;
 
+export function GetAllMCPTools():Promise<Array<models.MCPServerTool>>;
+
 export function GetAllMarkets():Promise<Array<string>>;
+
+export function GetAllSkills():Promise<Array<models.Skill>>;
 
 export function GetAllStockChangesWithPaging(arg1:number):Promise<data.StockChangesResponse>;
 
@@ -152,23 +221,67 @@ export function GetAssets():Promise<Array<asset.Asset>>;
 
 export function GetAssetsByType(arg1:string):Promise<Array<asset.Asset>>;
 
+export function GetBKFundFlowListByDate(arg1:string,arg2:string):Promise<Array<models.BKFundFlowPoint>>;
+
+export function GetBKFundFlowTopListByDate(arg1:string,arg2:number):Promise<Array<models.BKFundFlow>>;
+
 export function GetBetterFunds(arg1:portfolio.BetterFundQuery):Promise<portfolio.BetterFundResult>;
 
+export function GetChangeRank(arg1:number,arg2:number):Promise<data.ChangeRankResult>;
+
+export function GetChangeTypeDailyStats(arg1:number):Promise<Array<data.ChangeTypeDailyStats>>;
+
+export function GetChipDistribution(arg1:string,arg2:number,arg3:number,arg4:string):Promise<data.ChipDistributionResult>;
+
+export function GetConceptFundFlowListByDate(arg1:string,arg2:string):Promise<Array<models.ConceptFundFlowPoint>>;
+
+export function GetConceptFundFlowTopListByDate(arg1:string,arg2:number):Promise<Array<models.ConceptFundFlow>>;
+
 export function GetConfig():Promise<data.SettingConfig>;
+
+export function GetCronTaskByID(arg1:number):Promise<models.CronTask>;
+
+export function GetCronTaskList(arg1:models.CronTaskQuery):Promise<models.CronTaskPageResp>;
+
+export function GetCronTaskTypes():Promise<Array<lo.Tuple2_string_string_>>;
+
+export function GetDailyChangeStats(arg1:number):Promise<Array<data.DailyChangeStats>>;
+
+export function GetDailyDimensionStats(arg1:string,arg2:string,arg3:number):Promise<Array<data.DailyDimensionStats>>;
+
+export function GetEffectiveSponsorVip():Promise<Record<string, any>>;
 
 export function GetFollowList(arg1:number):Promise<any>;
 
 export function GetFollowedFund():Promise<Array<data.FollowedFund>>;
 
+export function GetFollowedFundPaged(arg1:number,arg2:number,arg3:string):Promise<Record<string, any>>;
+
+export function GetFundEstimateSourcePreference():Promise<string>;
+
+export function GetFundHistoryNetValue(arg1:string,arg2:number,arg3:string,arg4:string):Promise<Array<data.FundHistoryNetValue>>;
+
+export function GetFundKLine(arg1:string,arg2:string,arg3:number):Promise<data.KLineSourceResult>;
+
 export function GetFundPortfolioDashboard():Promise<portfolio.FundPortfolioDashboard>;
 
+export function GetFundPortfolioDashboardByFundEstimateSource(arg1:string):Promise<portfolio.FundPortfolioDashboard>;
+
 export function GetFundProfile(arg1:string):Promise<portfolio.FundProfile>;
+
+export function GetFundProfileByFundEstimateSource(arg1:string,arg2:string):Promise<portfolio.FundProfile>;
+
+export function GetFundRanking(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number,arg6:number):Promise<Record<string, any>>;
 
 export function GetFundRecommendationRefreshStatus(arg1:boolean):Promise<portfolio.FundRecommendationRefreshStatus>;
 
 export function GetFundScreener(arg1:portfolio.FundScreenerQuery):Promise<portfolio.FundScreenerResult>;
 
+export function GetFundTop10Holdings(arg1:string):Promise<Array<data.FundHoldingStock>>;
+
 export function GetGroupList():Promise<Array<data.Group>>;
+
+export function GetGroupStockList(arg1:number):Promise<Array<data.GroupStock>>;
 
 export function GetHoldingsByType(arg1:string):Promise<Array<portfolio.Holding>>;
 
@@ -210,6 +323,18 @@ export function GetLatestHouseholdAIAnalysis():Promise<asset.HouseholdAIAnalysis
 
 export function GetLatestPortfolioExpectationAIAnalysis():Promise<portfolio.PortfolioExpectationAIAnalysis>;
 
+export function GetLatestTradingDay():Promise<string>;
+
+export function GetMCPServerByID(arg1:number):Promise<models.MCPServer>;
+
+export function GetMCPServerList(arg1:models.MCPServerQuery):Promise<models.MCPServerPageResp>;
+
+export function GetMCPToolsByServerID(arg1:number):Promise<Array<models.MCPServerTool>>;
+
+export function GetMachineId():Promise<string>;
+
+export function GetMarketStatisticByDate(arg1:string):Promise<Array<models.MarketStatistic>>;
+
 export function GetMoneyRankSina(arg1:string):Promise<Array<Record<string, any>>>;
 
 export function GetPortfolioExpectationSummary():Promise<portfolio.PortfolioExpectationSummary>;
@@ -230,13 +355,29 @@ export function GetQuantTemplate(arg1:number):Promise<quant.Template>;
 
 export function GetQuantTemplates(arg1:number,arg2:string,arg3:number,arg4:number):Promise<Array<quant.Template>|number>;
 
+export function GetRecentDaysMarketStatistic(arg1:number):Promise<Array<models.MarketStatistic>>;
+
+export function GetSkillByID(arg1:number):Promise<models.Skill>;
+
+export function GetSkillList(arg1:models.SkillQuery):Promise<models.SkillPageResp>;
+
 export function GetSponsorInfo():Promise<Record<string, any>>;
 
 export function GetStockChangeHistory(arg1:models.StockChangeHistoryQuery):Promise<models.StockChangeHistoryPageData>;
 
 export function GetStockChanges(arg1:Array<number>,arg2:number,arg3:number):Promise<data.StockChangesResponse>;
 
+export function GetStockCommonKLine(arg1:string,arg2:string,arg3:number):Promise<any>;
+
+export function GetStockEastMoneyKLine(arg1:string,arg2:string,arg3:string,arg4:number):Promise<any>;
+
+export function GetStockEastMoneyKLinePage(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string):Promise<any>;
+
 export function GetStockKLine(arg1:string,arg2:string,arg3:number):Promise<any>;
+
+export function GetStockKLinePageWithFallback(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string):Promise<data.KLineSourceResult>;
+
+export function GetStockKLineWithFallback(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string):Promise<data.KLineSourceResult>;
 
 export function GetStockList(arg1:string):Promise<Array<data.StockBasic>>;
 
@@ -244,9 +385,37 @@ export function GetStockMinutePriceLineData(arg1:string,arg2:string):Promise<Rec
 
 export function GetStockMoneyTrendByDay(arg1:string,arg2:number):Promise<Array<Record<string, any>>>;
 
+export function GetStockRealTimePrice(arg1:string):Promise<Record<string, any>>;
+
+export function GetTdxCallAuction(arg1:string,arg2:number,arg3:number):Promise<any>;
+
+export function GetTdxCompanyCategoryContent(arg1:string,arg2:string):Promise<data.TdxCompanyInfoSection>;
+
+export function GetTdxCompanyCategoryList(arg1:string):Promise<any>;
+
+export function GetTdxCompanyInfo(arg1:string):Promise<data.TdxCompanyInfoBundle>;
+
+export function GetTdxFinanceInfo(arg1:string):Promise<data.TdxFinanceInfo>;
+
+export function GetTdxSymbolBelongBoard(arg1:string):Promise<any>;
+
+export function GetTdxXDXRInfo(arg1:string):Promise<any>;
+
 export function GetTelegraphList(arg1:string):Promise<any>;
 
+export function GetTodayMarketStatistic():Promise<Array<models.MarketStatistic>>;
+
+export function GetTradingRecordList(arg1:data.TradingRecordListQuery):Promise<data.TradingRecordPageData>;
+
+export function GetTradingRecordStatistics():Promise<data.TradingRecordStatistics>;
+
 export function GetTransactions(arg1:string,arg2:number,arg3:number):Promise<Array<portfolio.Transaction>|number>;
+
+export function GetTypeStatsByDate(arg1:string):Promise<Array<data.TypeCountStats>>;
+
+export function GetUplimitHot(arg1:string,arg2:number):Promise<Record<string, any>>;
+
+export function GetUserManual():Promise<string>;
 
 export function GetVersionInfo():Promise<models.VersionInfo>;
 
@@ -264,21 +433,39 @@ export function HotTopic(arg1:number):Promise<Array<any>>;
 
 export function IndustryResearchReport(arg1:string):Promise<Array<any>>;
 
+export function InitCronTasks():Promise<void>;
+
 export function InitializeGroupSort():Promise<boolean>;
 
 export function InvestCalendarTimeLine(arg1:string):Promise<Array<any>>;
+
+export function IsHKTradingTime():Promise<boolean>;
+
+export function IsTradingDay(arg1:string):Promise<boolean>;
+
+export function IsTradingTime():Promise<boolean>;
+
+export function IsUSTradingTime():Promise<boolean>;
 
 export function LongTigerRank(arg1:string):Promise<any>;
 
 export function NewChatStream(arg1:string,arg2:string,arg3:string,arg4:number,arg5:any,arg6:boolean,arg7:boolean):Promise<void>;
 
+export function NewsPush(arg1:any):Promise<void>;
+
 export function OpenURL(arg1:string):Promise<void>;
+
+export function PromptPlazaRequest(arg1:string,arg2:string,arg3:string,arg4:Record<string, any>,arg5:string,arg6:string):Promise<Record<string, any>>;
+
+export function QuitApp():Promise<void>;
 
 export function ReFleshTelegraphList(arg1:string):Promise<any>;
 
 export function RebuildHouseholdLiabilitySchedule(arg1:number):Promise<boolean>;
 
 export function RefreshFundProfile(arg1:string):Promise<portfolio.FundProfile>;
+
+export function RefreshFundProfileByFundEstimateSource(arg1:string,arg2:string):Promise<portfolio.FundProfile>;
 
 export function RefreshFundScreenerData(arg1:number):Promise<Record<string, any>>;
 
@@ -288,13 +475,21 @@ export function RemoveStockGroup(arg1:string,arg2:string,arg3:number):Promise<st
 
 export function RenameFundWatchGroup(arg1:string,arg2:string):Promise<string>;
 
+export function RestartAsAdmin():Promise<void>;
+
 export function RunHouseholdAIAnalysis(arg1:string,arg2:number,arg3:number,arg4:string):Promise<Record<string, any>>;
 
 export function RunPortfolioExpectationAIAnalysis(arg1:number,arg2:number,arg3:string):Promise<Record<string, any>>;
 
 export function SaveAIResponseResult(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number):Promise<void>;
 
+export function SaveAiAssistantSession(arg1:string,arg2:Array<models.AiAssistantMessage>):Promise<void>;
+
 export function SaveAsMarkdown(arg1:string,arg2:string):Promise<string>;
+
+export function SaveCustomStrategy(arg1:models.CustomStrategy):Promise<string>;
+
+export function SaveFundEstimateSourcePreference(arg1:string):Promise<string>;
 
 export function SaveHouseholdSnapshot(arg1:string):Promise<asset.HouseholdSnapshot>;
 
@@ -306,11 +501,21 @@ export function SaveStockChangesToHistory(arg1:Array<number>):Promise<string>;
 
 export function SaveWordFile(arg1:string,arg2:string):Promise<string>;
 
+export function SearchCronTasks(arg1:string):Promise<Array<models.CronTask>>;
+
+export function SearchFundCodes(arg1:string):Promise<Array<Record<string, string>>>;
+
 export function SearchQuantScriptsWithAI(arg1:quant.ScriptSearchRequest,arg2:number):Promise<Record<string, any>>;
 
 export function SearchStock(arg1:string):Promise<Record<string, any>>;
 
+export function SendDingDingMessage(arg1:string,arg2:string):Promise<string>;
+
 export function SendDingDingMessageByType(arg1:string,arg2:string,arg3:number):Promise<string>;
+
+export function SendFeishuMessage(arg1:string,arg2:string):Promise<string>;
+
+export function SendFeishuMessageByType(arg1:string,arg2:string,arg3:number):Promise<string>;
 
 export function SendLocalNotification(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 
@@ -322,7 +527,11 @@ export function SetStockAICron(arg1:string,arg2:string):Promise<void>;
 
 export function SetStockSort(arg1:number,arg2:string):Promise<void>;
 
+export function SetTradingPrice(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number):Promise<string>;
+
 export function ShareAnalysis(arg1:string,arg2:string):Promise<string>;
+
+export function ShareText(arg1:string,arg2:string):Promise<string>;
 
 export function StockNotice(arg1:string):Promise<Array<any>>;
 
@@ -332,17 +541,27 @@ export function SummaryStockNews(arg1:string,arg2:number,arg3:any,arg4:boolean,a
 
 export function SyncPortfolioQuotes():Promise<portfolio.PortfolioSummary>;
 
+export function SyncPortfolioQuotesByFundEstimateSource(arg1:string):Promise<portfolio.PortfolioSummary>;
+
 export function TestAIConfigConnection(arg1:data.AIConfig):Promise<Record<string, any>>;
+
+export function TestMCPServer(arg1:number):Promise<string>;
 
 export function UnFollow(arg1:string):Promise<string>;
 
 export function UnFollowFund(arg1:string):Promise<string>;
 
+export function UpdateAiRecommendStocksAlert(arg1:number,arg2:boolean):Promise<string>;
+
 export function UpdateAsset(arg1:asset.Asset):Promise<asset.Asset>;
 
 export function UpdateConfig(arg1:data.SettingConfig):Promise<string>;
 
+export function UpdateCronTask(arg1:models.CronTask):Promise<string>;
+
 export function UpdateFundWatchGroup(arg1:string,arg2:string):Promise<string>;
+
+export function UpdateGroup(arg1:number,arg2:string):Promise<string>;
 
 export function UpdateGroupSort(arg1:number,arg2:number):Promise<boolean>;
 
@@ -360,14 +579,22 @@ export function UpdateHouseholdMember(arg1:asset.HouseholdMember):Promise<asset.
 
 export function UpdateHouseholdProtection(arg1:asset.HouseholdProtection):Promise<asset.HouseholdProtection>;
 
+export function UpdateMCPServer(arg1:models.MCPServer):Promise<string>;
+
 export function UpdatePromptTemplate(arg1:models.PromptTemplate):Promise<string>;
 
 export function UpdateQuantTemplate(arg1:quant.Template):Promise<quant.Template>;
+
+export function UpdateSkill(arg1:models.Skill):Promise<string>;
+
+export function UpdateTradingRecord(arg1:data.TradingRecord):Promise<void>;
 
 export function UpsertFundHoldingByAmount(arg1:portfolio.FundPositionInput):Promise<portfolio.Holding>;
 
 export function UpsertHouseholdBenchmark(arg1:asset.HouseholdBenchmarkRecord):Promise<asset.HouseholdBenchmarkRecord>;
 
 export function UpsertHouseholdProfile(arg1:asset.HouseholdProfile):Promise<asset.HouseholdProfile>;
+
+export function ValidateCronExpr(arg1:string):Promise<string>;
 
 export function VerifyAssetUnlockPassword(arg1:string):Promise<boolean>;

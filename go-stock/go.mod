@@ -129,5 +129,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.46.1 // indirect
 )
-
-// replace github.com/wailsapp/wails/v2 v2.9.2 => C:\Users\spark\go\pkg\mod

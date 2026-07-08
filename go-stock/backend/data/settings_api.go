@@ -19,6 +19,9 @@ type Settings struct {
 	LocalPushEnable        bool   `json:"localPushEnable"`
 	DingPushEnable         bool   `json:"dingPushEnable"`
 	DingRobot              string `json:"dingRobot"`
+	FeishuPushEnable       bool   `json:"feishuPushEnable"`
+	FeishuRobot            string `json:"feishuRobot"`
+	FeishuSecret           string `json:"feishuSecret" gorm:"column:feishu_secret"`
 	UpdateBasicInfoOnStart bool   `json:"updateBasicInfoOnStart"`
 	RefreshInterval        int64  `json:"refreshInterval"`
 	OpenAiEnable           bool   `json:"openAiEnable"`
@@ -40,7 +43,11 @@ type Settings struct {
 	HttpProxyEnabled       bool   `json:"httpProxyEnabled"`
 	EnableAgent            bool   `json:"enableAgent"`
 	QgqpBId                string `json:"qgqpBId" gorm:"column:qgqp_b_id"`
+	IwencaiApiKey          string `json:"iwencaiApiKey" gorm:"column:iwencai_api_key"`
+	EmApiKey               string `json:"emApiKey" gorm:"column:em_api_key"`
+	PromptPlazaApiBase     string `json:"promptPlazaApiBase" gorm:"column:prompt_plaza_api_base"`
 	AssetUnlockPassword    string `json:"assetUnlockPassword"`
+	FundEstimateSource     string `json:"fundEstimateSource"`
 }
 
 func (receiver Settings) TableName() string {
@@ -60,6 +67,8 @@ type AIConfig struct {
 	TimeOut          int     `json:"timeOut"`
 	HttpProxy        string  `json:"httpProxy"`
 	HttpProxyEnabled bool    `json:"httpProxyEnabled"`
+	SessionId        string  `json:"sessionId" gorm:"index;size:64"`
+	Thinking         bool    `json:"thinking"`
 }
 
 func (AIConfig) TableName() string {
@@ -69,6 +78,18 @@ func (AIConfig) TableName() string {
 type SettingConfig struct {
 	*Settings
 	AiConfigs []*AIConfig `json:"aiConfigs"`
+}
+
+func (c *SettingConfig) GetAIConfigThinking(aiConfigId int) bool {
+	if aiConfigId <= 0 && len(c.AiConfigs) > 0 {
+		return c.AiConfigs[0].Thinking
+	}
+	for _, cfg := range c.AiConfigs {
+		if int(cfg.ID) == aiConfigId {
+			return cfg.Thinking
+		}
+	}
+	return false
 }
 
 type SettingsApi struct {
@@ -116,6 +137,7 @@ func UpdateConfig(s *SettingConfig) string {
 			"enable_agent":               s.EnableAgent,
 			"qgqp_b_id":                  s.QgqpBId,
 			"asset_unlock_password":      s.AssetUnlockPassword,
+			"fund_estimate_source":       NormalizeFundEstimateSource(s.FundEstimateSource),
 		})
 
 		//更新AiConfig
@@ -134,6 +156,39 @@ func UpdateConfig(s *SettingConfig) string {
 		}
 	}
 	return "保存成功！"
+}
+
+func NormalizeFundEstimateSource(source string) string {
+	switch strings.TrimSpace(source) {
+	case "eastmoney_mobile":
+		return "eastmoney_mobile"
+	case "danjuan_position":
+		return "danjuan_position"
+	case "ai_corrected":
+		return "ai_corrected"
+	default:
+		return "eastmoney_js"
+	}
+}
+
+func UpdateFundEstimateSource(source string) string {
+	normalized := NormalizeFundEstimateSource(source)
+	var settings Settings
+	result := db.Dao.Model(&Settings{}).First(&settings)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			settings.FundEstimateSource = normalized
+			if err := db.Dao.Create(&settings).Error; err != nil {
+				return "保存基金估算源失败: " + err.Error()
+			}
+			return normalized
+		}
+		return "保存基金估算源失败: " + result.Error.Error()
+	}
+	if err := db.Dao.Model(&settings).Update("fund_estimate_source", normalized).Error; err != nil {
+		return "保存基金估算源失败: " + err.Error()
+	}
+	return normalized
 }
 
 func updateAiConfigs(aiConfigs []*AIConfig) error {
@@ -201,6 +256,17 @@ func updateAiConfigs(aiConfigs []*AIConfig) error {
 }
 
 func GetSettingConfig() *SettingConfig {
+	if db.Dao == nil {
+		return &SettingConfig{
+			Settings: &Settings{
+				CrawlTimeOut:       60,
+				KDays:              60,
+				BrowserPoolSize:    1,
+				FundEstimateSource: NormalizeFundEstimateSource(""),
+			},
+			AiConfigs: []*AIConfig{},
+		}
+	}
 	settingConfig := &SettingConfig{}
 	settings := &Settings{}
 	aiConfigs := make([]*AIConfig, 0)
@@ -231,6 +297,7 @@ func GetSettingConfig() *SettingConfig {
 	if settings.BrowserPoolSize <= 0 {
 		settings.BrowserPoolSize = 1
 	}
+	settings.FundEstimateSource = NormalizeFundEstimateSource(settings.FundEstimateSource)
 	applySettingsRuntimeDefaults(settings)
 	settingConfig.Settings = settings
 	settingConfig.AiConfigs = aiConfigs

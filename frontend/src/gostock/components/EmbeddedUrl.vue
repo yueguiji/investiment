@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="embed-container">
     <h3 v-if="title">{{ title }}</h3>
     <div class="iframe-wrapper">

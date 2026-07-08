@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 
 import {CaretDown, CaretUp, RefreshCircleOutline} from "@vicons/ionicons5";
 import {NText,useMessage} from "naive-ui";

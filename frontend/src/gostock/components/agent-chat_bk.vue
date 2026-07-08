@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="chat-box">
     <t-chat
         ref="chatRef"
@@ -54,7 +54,7 @@ const isStreamLoad = ref(false);
 const chatRef = ref(null);
 const isShowToBottom = ref(false);
 
-const icon = ref('');
+const icon = ref('https://raw.githubusercontent.com/ArvinLovegood/go-stock/master/build/appicon.png');
 import {darkTheme, NAvatar, NImage} from "naive-ui";
 import {ChatWithAgent, GetConfig, GetSponsorInfo, GetVersionInfo} from "../../../wailsjs/go/main/App";
 import {EventsOff, EventsOn} from '../../../wailsjs/runtime'

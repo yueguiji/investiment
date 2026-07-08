@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/duke-git/lancet/v2/convertor"
@@ -26,6 +27,8 @@ type StockChangeHistory struct {
 	Price      float64   `json:"price" gorm:"uniqueIndex:idx_unique_change"`
 	ChangeRate float64   `json:"changeRate" gorm:"uniqueIndex:idx_unique_change"`
 	Amount     float64   `json:"amount" gorm:"uniqueIndex:idx_unique_change"`
+	Industry   string    `json:"industry" gorm:"size:100"`
+	Concept    string    `json:"concept" gorm:"size:500"`
 	CreatedAt  time.Time `json:"createdAt" gorm:"autoCreateTime"`
 }
 
@@ -34,15 +37,23 @@ func (StockChangeHistory) TableName() string {
 }
 
 type StockChangeHistoryQuery struct {
-	StockCode   string `json:"stockCode"`
-	StockName   string `json:"stockName"`
-	ChangeType  int    `json:"changeType"`
-	ChangeTypes []int  `json:"changeTypes"`
-	TypeName    string `json:"typeName"`
-	StartDate   string `json:"startDate"`
-	EndDate     string `json:"endDate"`
-	Page        int    `json:"page"`
-	PageSize    int    `json:"pageSize"`
+	StockCode     string  `json:"stockCode"`
+	StockName     string  `json:"stockName"`
+	ChangeType    int     `json:"changeType"`
+	ChangeTypes   []int   `json:"changeTypes"`
+	TypeName      string  `json:"typeName"`
+	StartDate     string  `json:"startDate"`
+	EndDate       string  `json:"endDate"`
+	StartTime     string  `json:"startTime"`
+	EndTime       string  `json:"endTime"`
+	MinVolume     int64   `json:"minVolume"`
+	MinAmount     float64 `json:"minAmount"`
+	MinChangeRate float64 `json:"minChangeRate"`
+	MaxChangeRate float64 `json:"maxChangeRate"`
+	Industry      string  `json:"industry"`
+	Concept       string  `json:"concept"`
+	Page          int     `json:"page"`
+	PageSize      int     `json:"pageSize"`
 }
 
 type StockChangeHistoryPageData struct {
@@ -946,6 +957,39 @@ type StockMoneyDataDiff struct {
 	F265 string  `json:"f265" md:"板块代码"`
 }
 
+type MutualTop10DealResp struct {
+	Code    int                 `json:"code"`
+	Message string              `json:"message"`
+	Result  MutualTop10DealData `json:"result"`
+	Success bool                `json:"success"`
+	Version string              `json:"version"`
+}
+
+type MutualTop10DealData struct {
+	Pages int                 `json:"pages"`
+	Data  []MutualTop10Record `json:"data"`
+	Count int                 `json:"count"`
+}
+
+type MutualTop10Record struct {
+	MUTUALTYPE         string      `json:"MUTUAL_TYPE" md:"通道类型"`
+	SECURITYCODE       string      `json:"SECURITY_CODE" md:"股票代码"`
+	DERIVESECURITYCODE string      `json:"DERIVE_SECURITY_CODE" md:"完整股票代码"`
+	SECURITYNAME       string      `json:"SECURITY_NAME" md:"股票名称"`
+	TRADEDATE          string      `json:"TRADE_DATE" md:"交易日期"`
+	CLOSEPRICE         float64     `json:"CLOSE_PRICE" md:"收盘价"`
+	CHANGERATE         float64     `json:"CHANGE_RATE" md:"涨跌幅"`
+	NETBUYAMT          interface{} `json:"NET_BUY_AMT" md:"净买入额"`
+	RANK               int         `json:"RANK" md:"成交金额排名"`
+	BUYAMT             interface{} `json:"BUY_AMT" md:"买入额"`
+	SELLAMT            interface{} `json:"SELL_AMT" md:"卖出额"`
+	DEALAMT            int64       `json:"DEAL_AMT" md:"成交金额"`
+	DEALAMOUNT         float64     `json:"DEAL_AMOUNT" md:"总成交金额"`
+	MUTUALRATIO        float64     `json:"MUTUAL_RATIO" md:"占比成交"`
+	TURNOVERRATE       float64     `json:"TURNOVERRATE" md:"换手率"`
+	CHANGE             float64     `json:"CHANGE" md:"涨跌额"`
+}
+
 type StockConceptInfoResp struct {
 	Version string                 `json:"version"`
 	Result  StockConceptInfoResult `json:"result"`
@@ -1337,34 +1381,349 @@ func (s AllStockInfo) TableName() string {
 }
 
 type TechnicalIndicators struct {
-	MACDGOLDENFORK   bool `json:"MACD_GOLDEN_FORK"`
-	KDJGOLDENFORK    bool `json:"KDJ_GOLDEN_FORK"`
-	BREAKTHROUGH     bool `json:"BREAK_THROUGH"`
-	LOWFUNDSINFLOW   bool `json:"LOW_FUNDS_INFLOW"`
-	HIGHFUNDSOUTFLOW bool `json:"HIGH_FUNDS_OUTFLOW"`
-	BREAKUPMA5DAYS   bool `json:"BREAKUP_MA_5DAYS"`
-	LONGAVGARRAY     bool `json:"LONG_AVG_ARRAY"`
-	SHORTAVGARRAY    bool `json:"SHORT_AVG_ARRAY"`
-	UPPERLARGEVOLUME bool `json:"UPPER_LARGE_VOLUME"`
-	DOWNNARROWVOLUME bool `json:"DOWN_NARROW_VOLUME"`
-	ONEDAYANGLINE    bool `json:"ONE_DAYANG_LINE"`
-	TWODAYANGLINES   bool `json:"TWO_DAYANG_LINES"`
-	RISESUN          bool `json:"RISE_SUN"`
-	POWERFULGUN      bool `json:"POWER_FULGUN"`
-	RESTOREJUSTICE   bool `json:"RESTORE_JUSTICE"`
-	DOWN7DAYS        bool `json:"DOWN_7DAYS"`
-	UPPER8DAYS       bool `json:"UPPER_8DAYS"`
-	UPPER9DAYS       bool `json:"UPPER_9DAYS"`
-	UPPER4DAYS       bool `json:"UPPER_4DAYS"`
-	HEAVENRULE       bool `json:"HEAVEN_RULE"`
-	UPSIDEVOLUME     bool `json:"UPSIDE_VOLUME"`
-	BEARISHENGULFING bool `json:"BEARISH_ENGULFING"`
-	REVERSINGHAMMER  bool `json:"REVERSING_HAMMER"`
-	SHOOTINGSTAR     bool `json:"SHOOTING_STAR"`
-	EVENINGSTAR      bool `json:"EVENING_STAR"`
-	FIRSTDAWN        bool `json:"FIRST_DAWN"`
-	PREGNANT         bool `json:"PREGNANT"`
-	BLACKCLOUDTOPS   bool `json:"BLACK_CLOUD_TOPS"`
-	MORNINGSTAR      bool `json:"MORNING_STAR"`
-	NARROWFINISH     bool `json:"NARROW_FINISH"`
+	MACDGOLDENFORK     bool `json:"MACD_GOLDEN_FORK"`
+	KDJGOLDENFORK      bool `json:"KDJ_GOLDEN_FORK"`
+	BREAKTHROUGH       bool `json:"BREAK_THROUGH"`
+	LOWFUNDSINFLOW     bool `json:"LOW_FUNDS_INFLOW"`
+	HIGHFUNDSOUTFLOW   bool `json:"HIGH_FUNDS_OUTFLOW"`
+	BREAKUPMA5DAYS     bool `json:"BREAKUP_MA_5DAYS"`
+	LONGAVGARRAY       bool `json:"LONG_AVG_ARRAY"`
+	SHORTAVGARRAY      bool `json:"SHORT_AVG_ARRAY"`
+	UPPERLARGEVOLUME   bool `json:"UPPER_LARGE_VOLUME"`
+	DOWNNARROWVOLUME   bool `json:"DOWN_NARROW_VOLUME"`
+	ONEDAYANGLINE      bool `json:"ONE_DAYANG_LINE"`
+	TWODAYANGLINES     bool `json:"TWO_DAYANG_LINES"`
+	RISESUN            bool `json:"RISE_SUN"`
+	POWERFULGUN        bool `json:"POWER_FULGUN"`
+	RESTOREJUSTICE     bool `json:"RESTORE_JUSTICE"`
+	DOWN7DAYS          bool `json:"DOWN_7DAYS"`
+	UPPER8DAYS         bool `json:"UPPER_8DAYS"`
+	UPPER9DAYS         bool `json:"UPPER_9DAYS"`
+	UPPER4DAYS         bool `json:"UPPER_4DAYS"`
+	HEAVENRULE         bool `json:"HEAVEN_RULE"`
+	UPSIDEVOLUME       bool `json:"UPSIDE_VOLUME"`
+	BEARISHENGULFING   bool `json:"BEARISH_ENGULFING"`
+	REVERSINGHAMMER    bool `json:"REVERSING_HAMMER"`
+	SHOOTINGSTAR       bool `json:"SHOOTING_STAR"`
+	EVENINGSTAR        bool `json:"EVENING_STAR"`
+	FIRSTDAWN          bool `json:"FIRST_DAWN"`
+	PREGNANT           bool `json:"PREGNANT"`
+	BLACKCLOUDTOPS     bool `json:"BLACK_CLOUD_TOPS"`
+	MORNINGSTAR        bool `json:"MORNING_STAR"`
+	NARROWFINISH       bool `json:"NARROW_FINISH"`
+	UPP_DAYS           int  `json:"UPP_DAYS" operator:">="`
+	CONCERN_RANK_7DAYS int  `json:"CONCERN_RANK_7DAYS" operator:"<="`
+	UPNDAY             int  `json:"UPNDAY" operator:">="`
+	DOWNNDAY           int  `json:"DOWNNDAY" operator:">="`
+}
+
+type CronTask struct {
+	ID            uint       `json:"id" gorm:"primarykey"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+	Name          string     `json:"name" gorm:"size:255;not null"`
+	CronExpr      string     `json:"cronExpr" gorm:"size:100;not null"`
+	TaskType      string     `json:"taskType" gorm:"size:50;not null"`
+	Target        string     `json:"target" gorm:"size:255"`
+	Params        string     `json:"params" gorm:"type:text"`
+	Enable        bool       `json:"enable" gorm:"default:true"`
+	LastRunAt     *time.Time `json:"lastRunAt"`
+	NextRunAt     *time.Time `json:"nextRunAt"`
+	RunCount      int64      `json:"runCount" gorm:"default:0"`
+	Status        string     `json:"status" gorm:"size:20;default:active"`
+	Description   string     `json:"description" gorm:"size:500"`
+	LastRunResult string     `json:"lastRunResult" gorm:"size:500"`
+}
+
+func (CronTask) TableName() string {
+	return "cron_tasks"
+}
+
+type CronTaskQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Name     string `json:"name"`
+	TaskType string `json:"taskType"`
+	Status   string `json:"status"`
+	Enable   *bool  `json:"enable"`
+}
+
+type CronTaskPageResp struct {
+	Total int        `json:"total"`
+	Data  []CronTask `json:"data"`
+}
+
+type CronTaskPageData struct {
+	List       []CronTask `json:"list"`
+	TotalCount int        `json:"totalCount"`
+	Page       int        `json:"page"`
+	PageSize   int        `json:"pageSize"`
+}
+
+type AiAssistantSession struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	SessionId string    `json:"sessionId" gorm:"index;size:64"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	Messages  string    `json:"messages" gorm:"type:text"`
+}
+
+func (AiAssistantSession) TableName() string {
+	return "ai_assistant_sessions"
+}
+
+type AiAssistantMessage struct {
+	Role        string          `json:"role"`
+	Content     string          `json:"content"`
+	Reasoning   string          `json:"reasoning"`
+	Time        string          `json:"time"`
+	ModelName   string          `json:"modelName,omitempty"`
+	ToolCalls   json.RawMessage `json:"toolCalls,omitempty"`
+	ToolResults json.RawMessage `json:"toolResults,omitempty"`
+	Timeline    json.RawMessage `json:"timeline,omitempty"`
+}
+
+type AiAssistantSessionResp struct {
+	Messages  []AiAssistantMessage `json:"messages"`
+	SessionId string               `json:"sessionId"`
+}
+
+type MCPServer struct {
+	ID          uint      `json:"id" gorm:"primarykey"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Name        string    `json:"name" gorm:"size:255;not null"`
+	Description string    `json:"description" gorm:"size:500"`
+	URL         string    `json:"url" gorm:"size:500"`
+	Type        string    `json:"type" gorm:"size:20;default:streamable-http"`
+	Headers     string    `json:"headers" gorm:"type:text"`
+	Command     string    `json:"command" gorm:"size:500"`
+	Args        string    `json:"args" gorm:"type:text"`
+	Env         string    `json:"env" gorm:"type:text"`
+	Enable      bool      `json:"enable" gorm:"default:true"`
+	Status      string    `json:"status" gorm:"size:20;default:stopped"`
+	TestResult  string    `json:"testResult" gorm:"size:500"`
+}
+
+func (MCPServer) TableName() string {
+	return "mcp_servers"
+}
+
+type MCPServerQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Enable   *bool  `json:"enable"`
+}
+
+type MCPServerPageResp struct {
+	Total int         `json:"total"`
+	Data  []MCPServer `json:"data"`
+}
+
+type MCPServerTool struct {
+	ID           uint      `json:"id" gorm:"primarykey"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	MCPServerID  uint      `json:"mcpServerId" gorm:"index;not null"`
+	ToolName     string    `json:"toolName" gorm:"size:255;not null"`
+	Description  string    `json:"description" gorm:"type:text"`
+	ParamsSchema string    `json:"paramsSchema" gorm:"type:text"`
+}
+
+func (MCPServerTool) TableName() string {
+	return "mcp_server_tools"
+}
+
+type Skill struct {
+	ID              uint      `json:"id" gorm:"primarykey"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	Name            string    `json:"name" gorm:"size:255;not null"`
+	Description     string    `json:"description" gorm:"size:500"`
+	Category        string    `json:"category" gorm:"size:50"`
+	SystemPrompt    string    `json:"systemPrompt" gorm:"type:text"`
+	Examples        string    `json:"examples" gorm:"type:text"`
+	TriggerKeywords string    `json:"triggerKeywords" gorm:"size:500"`
+	MCPServerIDs    string    `json:"mcpServerIds" gorm:"size:500"`
+	Enable          bool      `json:"enable" gorm:"default:true"`
+	SortOrder       int       `json:"sortOrder" gorm:"default:0"`
+}
+
+func (Skill) TableName() string {
+	return "skills"
+}
+
+type SkillQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Enable   *bool  `json:"enable"`
+}
+
+type SkillPageResp struct {
+	Total int     `json:"total"`
+	Data  []Skill `json:"data"`
+}
+
+type CustomStrategy struct {
+	ID          uint      `json:"id" gorm:"primarykey"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Name        string    `json:"name" gorm:"size:255;not null"`
+	Query       string    `json:"query" gorm:"type:text;not null"`
+	Description string    `json:"description" gorm:"size:500"`
+	SortOrder   int       `json:"sortOrder" gorm:"default:0"`
+}
+
+func (CustomStrategy) TableName() string {
+	return "custom_strategies"
+}
+
+type CustomStrategyQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Name     string `json:"name"`
+}
+
+type CustomStrategyPageData struct {
+	List       []CustomStrategy `json:"list"`
+	Total      int64            `json:"total"`
+	Page       int              `json:"page"`
+	PageSize   int              `json:"pageSize"`
+	TotalPages int              `json:"totalPages"`
+}
+
+type SecuritiesCompanyOpinionResp struct {
+	Hits        int                             `json:"hits"`
+	Size        int                             `json:"size"`
+	Data        []*SecuritiesCompanyOpinionData `json:"data"`
+	TotalPage   int                             `json:"TotalPage"`
+	AuthorName  string                          `json:"authorName"`
+	PageNo      int                             `json:"pageNo"`
+	OrgSName    string                          `json:"orgSName"`
+	CurrentYear int                             `json:"currentYear"`
+}
+
+type SecuritiesCompanyOpinionData struct {
+	Id           int64       `json:"id"`
+	Title        string      `json:"title"`
+	Author       interface{} `json:"author"`
+	OrgName      string      `json:"orgName"`
+	OrgCode      string      `json:"orgCode"`
+	OrgSName     string      `json:"orgSName"`
+	PublishDate  string      `json:"publishDate"`
+	EncodeUrl    string      `json:"encodeUrl"`
+	Researcher   string      `json:"researcher"`
+	Market       string      `json:"market"`
+	IndustryCode string      `json:"industryCode"`
+	IndustryName string      `json:"industryName"`
+	AuthorID     interface{} `json:"authorID"`
+	Count        int         `json:"count"`
+	OrgType      string      `json:"orgType"`
+	OpinionData  string      `json:"opinionData"`
+}
+
+type StockRZRQInfoResp struct {
+	Version string `json:"version"`
+	Result  struct {
+		Pages int             `json:"pages"`
+		Data  []StockRZRQInfo `json:"data"`
+		Count int             `json:"count"`
+	} `json:"result"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Code    int    `json:"code"`
+}
+
+type StockRZRQInfo struct {
+	TRADEDATE      string  `json:"TRADE_DATE" md:"交易日期"`
+	FINBALANCE     int64   `json:"FIN_BALANCE" md:"融资余额(元)"`
+	FINBUYAMT      int     `json:"FIN_BUY_AMT" md:"融资买入额(元)"`
+	FINREPAYAMT    int     `json:"FIN_REPAY_AMT" md:"融资还款额(元)"`
+	LOANBALANCE    float64 `json:"LOAN_BALANCE" md:"融券余额(元)"`
+	LOANSELLVOL    int     `json:"LOAN_SELL_VOL" md:"融券卖出量(股)"`
+	LOANREPAYVOL   int     `json:"LOAN_REPAY_VOL" md:"融券还款量(股)"`
+	MARGINBALANCE  float64 `json:"MARGIN_BALANCE" md:"两融余额(股)"`
+	LOANBALANCEVOL int     `json:"LOAN_BALANCE_VOL" md:"融券余量(股)"`
+	FINNETBUYAMT   int     `json:"FIN_NETBUY_AMT" md:"融资净买入额(元)"`
+}
+
+type GlobalStockIndex struct {
+	gorm.Model
+	Code       string `json:"code" gorm:"index"`
+	Name       string `json:"name" md:"指数名称"`
+	Location   string `json:"location" md:"地区"`
+	Qtcode     string `json:"qtcode" gorm:"index"`
+	State      string `json:"state" md:"状态"`
+	Zdf        string `json:"zdf" md:"涨跌幅(%)"`
+	Zxj        string `json:"zxj" md:"最新点位"`
+	Img        string `json:"img" md:"图标URL"`
+	Region     string `json:"region" gorm:"index"`
+	RegionName string `json:"regionName" md:"区域名称"`
+}
+
+func (GlobalStockIndex) TableName() string {
+	return "global_stock_index"
+}
+
+type MarketStatistic struct {
+	ID            uint      `json:"id" gorm:"primarykey"`
+	DataDate      string    `json:"dataDate" gorm:"index;size:10"`
+	DataTime      string    `json:"dataTime" gorm:"index;size:8"`
+	UpCount       int       `json:"upCount"`
+	DownCount     int       `json:"downCount"`
+	UpRatio       float64   `json:"upRatio"`
+	UpDownRatio   float64   `json:"upDownRatio"`
+	SentimentDesc string    `json:"sentimentDesc" gorm:"size:20"`
+	LimitUp       int       `json:"limitUp"`
+	LimitDown     int       `json:"limitDown"`
+	LimitRatio    float64   `json:"limitRatio"`
+	ShUpCount     int       `json:"shUpCount"`
+	ShDownCount   int       `json:"shDownCount"`
+	SzUpCount     int       `json:"szUpCount"`
+	SzDownCount   int       `json:"szDownCount"`
+	CreatedAt     time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+func (MarketStatistic) TableName() string {
+	return "market_statistic"
+}
+
+type BKFundFlow struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	Code      string    `json:"code" gorm:"size:20;index:idx_bk_code_time"`
+	Name      string    `json:"name" gorm:"size:50"`
+	NetInflow int64     `json:"netInflow"`
+	SnapTime  string    `json:"snapTime" gorm:"size:19;index:idx_bk_code_time"`
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+func (BKFundFlow) TableName() string {
+	return "bk_fund_flow"
+}
+
+type BKFundFlowPoint struct {
+	SnapTime  string `json:"snapTime"`
+	NetInflow int64  `json:"netInflow"`
+}
+
+type ConceptFundFlow struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	Code      string    `json:"code" gorm:"size:20;index:idx_concept_code_time"`
+	Name      string    `json:"name" gorm:"size:50"`
+	NetInflow int64     `json:"netInflow"`
+	SnapTime  string    `json:"snapTime" gorm:"size:19;index:idx_concept_code_time"`
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+}
+
+func (ConceptFundFlow) TableName() string {
+	return "concept_fund_flow"
+}
+
+type ConceptFundFlowPoint struct {
+	SnapTime  string `json:"snapTime"`
+	NetInflow int64  `json:"netInflow"`
 }

@@ -22,6 +22,9 @@ import (
 //go:embed frontend/dist
 var assets embed.FS
 
+//go:embed docs/go-stock使用手册.md
+var userManual []byte
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {

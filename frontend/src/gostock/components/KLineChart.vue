@@ -1,8 +1,8 @@
-﻿<script setup>
+<script setup>
 
 import {GetStockKLine} from "../../../wailsjs/go/main/App";
 import * as echarts from "echarts";
-import {onMounted, onUnmounted, ref} from "vue";
+import {onMounted, ref} from "vue";
 import _ from "lodash";
 const { code,stockName,darkTheme,kDays ,chartHeight} = defineProps({
   code: {
@@ -31,35 +31,16 @@ const upBorderColor = '';
 const downColor = '#00da3c';
 const downBorderColor = '';
 const kLineChartRef = ref(null);
-const chartRef = ref(null)
 
 onMounted(() => {
   handleKLine(code,stockName)
 })
 
-onUnmounted(() => {
-  if (chartRef.value) {
-    chartRef.value.dispose()
-    chartRef.value = null
-  }
-})
-
 function  handleKLine(code,stockName){
   console.log("handleKLine",code,stockName)
-  if (!kLineChartRef.value) {
-    return
-  }
-  const chart = chartRef.value ?? echarts.init(kLineChartRef.value);
-  chartRef.value = chart
+  const chart = echarts.init(kLineChartRef.value);
   chart.showLoading()
   GetStockKLine(code,stockName,365).then(result => {
-    if (!chartRef.value || chart.isDisposed?.()) {
-      return
-    }
-    if (!result || result.length < 2) {
-      chart.hideLoading()
-      return
-    }
     //console.log("GetStockKLine",result)
     const categoryData = [];
     const values = [];

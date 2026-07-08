@@ -1861,6 +1861,17 @@ func (a *App) ShareAnalysis(stockCode, stockName string) string {
 func (a *App) GetfundList(key string) []data.FundBasic {
 	return data.NewFundApi().GetFundList(key)
 }
+func (a *App) GetFundKLine(fundCode string, klt string, limit int) *data.KLineSourceResult {
+	return data.NewFundKLineApi().GetFundKLineWithFallback(fundCode, klt, limit)
+}
+func (a *App) GetFundTop10Holdings(fundCode string) []data.FundHoldingStock {
+	res, err := data.NewFundApi().GetFundTop10Holdings(fundCode)
+	if err != nil {
+		logger.SugaredLogger.Warnf("get fund top holdings failed: code=%s err=%v", fundCode, err)
+		return []data.FundHoldingStock{}
+	}
+	return res
+}
 func (a *App) GetFollowedFund() []data.FollowedFund {
 	return data.NewFundApi().GetFollowedFund()
 }
@@ -1947,6 +1958,10 @@ func (a *App) GetGroupStockList(groupId int) []data.GroupStock {
 	return data.NewStockGroupApi(db.Dao).GetGroupStockByGroupId(groupId)
 }
 
+func (a *App) GetAllGroupStocks() []data.GroupStock {
+	return data.NewStockGroupApi(db.Dao).GetAllGroupStocks()
+}
+
 func (a *App) AddStockGroup(groupId int, stockCode string) string {
 	ok := data.NewStockGroupApi(db.Dao).AddStockGroup(groupId, stockCode)
 	if ok {
@@ -1974,8 +1989,16 @@ func (a *App) RemoveGroup(groupId int) string {
 	}
 }
 
+func (a *App) UpdateGroup(id int, name string) string {
+	ok := data.NewStockGroupApi(db.Dao).UpdateGroup(id, name)
+	if ok {
+		return "success"
+	}
+	return "failed"
+}
+
 func (a *App) GetStockKLine(stockCode, stockName string, days int64) *[]data.KLineData {
-	return data.NewStockDataApi().GetHK_KLineData(stockCode, "day", days)
+	return data.NewStockDataApi().GetStockKLineWithFallback(stockCode, "day", days)
 }
 
 func (a *App) GetStockMinutePriceLineData(stockCode, stockName string) map[string]any {

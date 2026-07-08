@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"investment-platform/internal/asset"
@@ -31,10 +32,16 @@ type App struct {
 	ctx context.Context
 
 	// go-stock 原有能力
-	cache      *freecache.Cache
-	cron       *cron.Cron
-	cronEntrys map[string]cron.EntryID
-	AiTools    []data.Tool
+	cache            *freecache.Cache
+	cron             *cron.Cron
+	cronEntrysMu     sync.Mutex
+	cronEntrys       map[string]cron.EntryID
+	AiTools          []data.Tool
+	agentCancelMu    sync.Mutex
+	agentCancel      context.CancelFunc
+	agentCancelSeq   uint64
+	summaryCancel    context.CancelFunc
+	summaryCancelSeq uint64
 
 	// 平台新增模块服务
 	AssetService     *asset.Service
@@ -96,6 +103,7 @@ func (a *App) bootstrapGoStockRuntime() {
 	go data.NewMarketNewsApi().TelegraphList(30)
 	go data.NewMarketNewsApi().GetSinaNews(30)
 	go data.NewMarketNewsApi().TradingViewNews()
+	a.InitCronTasks()
 
 	if len(data.NewStockDataApi().GetStockList("")) == 0 {
 		logger.SugaredLogger.Warn("go-stock bootstrap: stock basic data is still empty")
@@ -702,6 +710,10 @@ func (a *App) GetFundPortfolioDashboard() *portfolio.FundPortfolioDashboard {
 	return a.PortfolioService.GetFundDashboard()
 }
 
+func (a *App) GetFundPortfolioDashboardByFundEstimateSource(estimateSource string) *portfolio.FundPortfolioDashboard {
+	return a.PortfolioService.GetFundDashboardByFundEstimateSource(estimateSource)
+}
+
 func (a *App) GetPortfolioExpectationSummary() *portfolio.PortfolioExpectationSummary {
 	profile := a.AssetService.GetHouseholdProfile()
 	householdSummary := a.AssetService.GetHouseholdDashboardSummary()
@@ -725,8 +737,29 @@ func (a *App) GetFundProfile(code string) *portfolio.FundProfile {
 	return a.PortfolioService.GetFundProfile(code)
 }
 
+func (a *App) GetFundProfileByFundEstimateSource(code string, estimateSource string) *portfolio.FundProfile {
+	return a.PortfolioService.GetFundProfileByFundEstimateSource(code, estimateSource)
+}
+
+func (a *App) GetFundKLine(fundCode string, klt string, limit int) *data.KLineSourceResult {
+	return data.NewFundKLineApi().GetFundKLineWithFallback(fundCode, klt, limit)
+}
+
+func (a *App) GetFundTop10Holdings(fundCode string) []data.FundHoldingStock {
+	res, err := data.NewFundApi().GetFundTop10Holdings(fundCode)
+	if err != nil {
+		logger.SugaredLogger.Warnf("get fund top holdings failed: code=%s err=%v", fundCode, err)
+		return []data.FundHoldingStock{}
+	}
+	return res
+}
+
 func (a *App) RefreshFundProfile(code string) *portfolio.FundProfile {
 	return a.PortfolioService.RefreshFundProfile(code)
+}
+
+func (a *App) RefreshFundProfileByFundEstimateSource(code string, estimateSource string) *portfolio.FundProfile {
+	return a.PortfolioService.RefreshFundProfileByFundEstimateSource(code, estimateSource)
 }
 
 func (a *App) GetFundScreener(query portfolio.FundScreenerQuery) *portfolio.FundScreenerResult {
@@ -1105,6 +1138,18 @@ func formatFundAIStageRank(rank int, total int) string {
 
 func (a *App) SyncPortfolioQuotes() *portfolio.PortfolioSummary {
 	return a.PortfolioService.SyncPortfolioQuotes()
+}
+
+func (a *App) SyncPortfolioQuotesByFundEstimateSource(estimateSource string) *portfolio.PortfolioSummary {
+	return a.PortfolioService.SyncPortfolioQuotesByFundEstimateSource(estimateSource)
+}
+
+func (a *App) GetFundEstimateSourcePreference() string {
+	return data.NormalizeFundEstimateSource(data.GetSettingConfig().FundEstimateSource)
+}
+
+func (a *App) SaveFundEstimateSourcePreference(estimateSource string) string {
+	return data.UpdateFundEstimateSource(estimateSource)
 }
 
 func (a *App) GetProfitHistory(days int) []portfolio.ProfitSnapshot {

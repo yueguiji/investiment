@@ -39,7 +39,7 @@
               <div class="card stat">
                 <div class="label">今日估算涨跌幅</div>
                 <div class="value" :class="numberTone(estimateLatestRate)">{{ formatPercent(estimateLatestRate) }}</div>
-                <div class="muted">{{ estimateUpdatedAt || mergedFund.netEstimatedTime || '-' }}</div>
+                <div class="muted">{{ activeEstimateSourceLabel }} · {{ estimateUpdatedAt || mergedFund.netEstimatedTime || '-' }}</div>
               </div>
               <div class="card stat">
                 <div class="label">最近1日</div>
@@ -53,7 +53,7 @@
               </div>
               <div class="card stat">
                 <div class="label">回撤修复</div>
-                <div class="value" :class="repairInfo.progress >= 100 ? 'profit-text' : ''">{{ repairInfo.progressText }}</div>
+                <div class="value" :class="repairInfo.recovered ? 'profit-text' : ''">{{ repairInfo.repairDaysText }}</div>
                 <div class="muted">{{ repairInfo.status }}</div>
               </div>
             </section>
@@ -62,7 +62,7 @@
               <div class="head">
                 <div>
                   <div class="section-title">今日估值走势</div>
-                  <div class="muted">主看今日涨跌率曲线，Tooltip 里保留估算净值和时间。</div>
+                  <div class="muted">当前估算源：{{ activeEstimateSourceLabel }}。Tooltip 里保留估算净值和时间。</div>
                 </div>
                 <div class="muted">更新至 {{ estimateUpdatedAt || mergedFund.netEstimatedTime || '-' }}</div>
               </div>
@@ -109,8 +109,8 @@
             <section class="card block">
               <div class="head">
                 <div>
-                  <div class="section-title">业绩走势</div>
-                  <div class="muted">按区间起点归一化后的涨跌幅走势，单位净值只在 Tooltip 里显示。</div>
+                  <div class="section-title">业绩走势 / 回撤修复</div>
+                  <div class="muted">标出区间内最大回撤，以及从回撤低点修复到前高所用天数。</div>
                 </div>
                 <div class="switches">
                   <button v-for="item in rangeOptions" :key="item.value" type="button" class="pill-btn" :class="{ active: rangeKey === item.value }" @click="rangeKey = item.value">{{ item.label }}</button>
@@ -119,11 +119,59 @@
               <div v-if="performanceTrend.length" ref="performanceChartRef" class="chart"></div>
               <div v-else class="empty muted">暂无走势数据</div>
               <div class="mini-grid">
+                <div class="mini-card"><span class="muted">最大回撤</span><strong class="loss-text">{{ formatPercentNoSign(repairInfo.maxDrawdown) }}</strong></div>
+                <div class="mini-card"><span class="muted">修复天数</span><strong>{{ repairInfo.repairDaysText }}</strong></div>
                 <div class="mini-card"><span class="muted">前高</span><strong>{{ formatPrice(repairInfo.peakValue, 4) }}</strong></div>
                 <div class="mini-card"><span class="muted">回撤低点</span><strong>{{ formatPrice(repairInfo.valleyValue, 4) }}</strong></div>
-                <div class="mini-card"><span class="muted">当前净值</span><strong>{{ formatPrice(repairInfo.currentValue, 4) }}</strong></div>
-                <div class="mini-card"><span class="muted">走势更新时间</span><strong>{{ profile?.trendUpdatedAt || mergedFund.netUnitValueDate || '-' }}</strong></div>
               </div>
+            </section>
+
+            <section class="card block">
+              <div class="head">
+                <div>
+                  <div class="section-title">估算与实际对照</div>
+                  <div class="muted">{{ estimateCompareDescription }}</div>
+                </div>
+                <div class="muted">{{ estimateCompareSummary }}</div>
+              </div>
+              <div v-if="estimateCompareTrend.length" ref="estimateCompareChartRef" class="chart compact-chart"></div>
+              <div v-else class="empty muted">本地还没有足够的历史估算快照可对照</div>
+            </section>
+          </template>
+
+          <template v-else-if="activeTab === 'holdings'">
+            <section class="card block">
+              <div class="head">
+                <div>
+                  <div class="section-title">前十大重仓股</div>
+                  <div class="muted">来自基金季报持仓，辅助判断估值偏差来自哪些股票暴露。</div>
+                </div>
+                <div class="muted">{{ holdingsSummary }}</div>
+              </div>
+              <n-spin :show="holdingsLoading">
+                <div v-if="fundHoldings.length" class="holdings-list">
+                  <div class="holdings-row header">
+                    <span>排名</span>
+                    <span>股票</span>
+                    <span>市场</span>
+                    <span>占净值</span>
+                    <span>最新价</span>
+                    <span>涨跌幅</span>
+                  </div>
+                  <div v-for="item in fundHoldings" :key="`${item.rank}-${item.stockCode}`" class="holdings-row">
+                    <span>{{ item.rank || '-' }}</span>
+                    <span>
+                      <strong>{{ item.stockName || '-' }}</strong>
+                      <em>{{ item.stockCode || '-' }}</em>
+                    </span>
+                    <span>{{ item.market || '-' }}</span>
+                    <span>{{ formatPercentNoSign(item.ratio) }}</span>
+                    <span>{{ formatPrice(item.price, 2) }}</span>
+                    <span :class="numberTone(item.changeRate)">{{ formatPercent(item.changeRate) }}</span>
+                  </div>
+                </div>
+                <div v-else class="empty muted">暂无重仓股数据</div>
+              </n-spin>
             </section>
           </template>
 
@@ -156,21 +204,30 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import * as echarts from 'echarts'
 
-const props = defineProps({ show: { type: Boolean, default: false }, fund: { type: Object, default: null } })
+const props = defineProps({
+  show: { type: Boolean, default: false },
+  fund: { type: Object, default: null },
+  estimateSource: { type: String, default: 'eastmoney_js' }
+})
 const emit = defineEmits(['update:show', 'refreshed'])
 const message = useMessage()
 const loading = ref(false)
 const profile = ref(null)
+const fundHoldings = ref([])
 const estimateChartRef = ref(null)
 const performanceChartRef = ref(null)
+const estimateCompareChartRef = ref(null)
 const rangeKey = ref('3m')
 const activeTab = ref('overview')
+const holdingsLoading = ref(false)
 let estimateChart = null
 let performanceChart = null
+let estimateCompareChart = null
 
 const tabs = [
   { label: '概览', value: 'overview' },
   { label: '排行与走势', value: 'analysis' },
+  { label: '重仓股', value: 'holdings' },
   { label: '基金详情', value: 'profile' }
 ]
 
@@ -185,12 +242,26 @@ const displayCategory = computed(() => mergedFund.value?.categoryLabel || inferC
 const latestNavNote = computed(() => mergedFund.value?.netUnitValueDate ? `最近净值更新 ${mergedFund.value.netUnitValueDate}` : '净值更新时间待同步')
 const latestReturnValue = computed(() => num(profile.value?.latestReturn))
 const estimateUpdatedAt = computed(() => profile.value?.estimateTrendUpdatedAt || '')
+const activeEstimateSource = computed(() => normalizeEstimateSource(profile.value?.estimateSource || props.estimateSource))
+const activeEstimateSourceLabel = computed(() => estimateSourceOptions[activeEstimateSource.value] || '天天基金 JS')
+const estimateCompareEstimateLabel = computed(() => activeEstimateSource.value === 'ai_corrected' ? 'AI纠偏估算' : '盘中估算')
+const estimateCompareDescription = computed(() => `按每天最后一次${estimateCompareEstimateLabel.value}对比实际净值涨跌，帮助判断估算偏差。`)
 const rawEstimateTrend = computed(() => Array.isArray(profile.value?.estimateTrend) ? profile.value.estimateTrend : [])
 const estimateTrend = computed(() => normalizeEstimateTrend(rawEstimateTrend.value, mergedFund.value?.netUnitValue))
 const estimateLatestRate = computed(() => num(profile.value?.estimateLatestRate) ?? num(mergedFund.value?.netEstimatedRate) ?? estimateTrend.value.at(-1)?.rate ?? null)
 const estimateHasCurve = computed(() => estimateTrend.value.length >= 2)
 const estimateStats = computed(() => buildEstimateStats(estimateTrend.value))
 const estimateEmptyText = computed(() => estimateTrend.value.length === 1 ? '今天目前只采样到 1 个估值点，继续开着详情页或手动刷新，系统会自动补成曲线。' : (mergedFund.value?.netEstimatedTime ? `今天还没有新的盘中估值序列，最近一次估值时间是 ${mergedFund.value.netEstimatedTime}。` : '当前基金今天还没有盘中估值数据。'))
+const estimateCompareTrend = computed(() => normalizeEstimateCompareTrend(profile.value?.estimateCompareTrend || []))
+const estimateCompareSummary = computed(() => {
+  const points = estimateCompareTrend.value
+  if (!points.length) return '等待历史快照'
+  const errors = points
+    .map((item) => Math.abs(Number(item.estimatedRate || 0) - Number(item.actualRate || 0)))
+    .filter((item) => Number.isFinite(item))
+  const mae = errors.length ? errors.reduce((sum, item) => sum + item, 0) / errors.length : 0
+  return `${points.length} 天样本 · 平均偏差 ${mae.toFixed(2)}%`
+})
 const preferredRankings = computed(() => {
   const order = ['近1周', '近1月', '近3月', '近6月']
   const map = new Map((profile.value?.stageRankings || []).map((i) => [i.period, i]))
@@ -206,18 +277,31 @@ const stageMetrics = computed(() => {
 })
 const activeTrend = computed(() => filterTrend(profile.value?.trend || [], rangeKey.value))
 const performanceTrend = computed(() => normalizePerformanceTrend(activeTrend.value))
-const repairTrend = computed(() => buildRepairTrend(activeTrend.value))
-const repairInfo = computed(() => buildRepairInfo(filterTrend(profile.value?.trend || [], '6m')))
+const repairInfo = computed(() => buildRepairInfo(performanceTrend.value))
+const holdingsSummary = computed(() => {
+  if (!fundHoldings.value.length) return '等待持仓数据'
+  const quarter = fundHoldings.value.find((item) => item.quarter)?.quarter || ''
+  const ratio = fundHoldings.value.reduce((sum, item) => sum + Number(item.ratio || 0), 0)
+  return `${quarter || '最近披露'} · 合计 ${ratio.toFixed(2)}%`
+})
 
-watch(() => [props.show, props.fund?.stockCode], async ([show, code], oldValue) => {
-  const [prevShow, prevCode] = Array.isArray(oldValue) ? oldValue : [false, '']
-  if (show && code && (code !== prevCode || (!prevShow && show) || !profile.value)) {
+const estimateSourceOptions = {
+  eastmoney_js: '天天基金 JS',
+  eastmoney_mobile: '天天基金移动端',
+  danjuan_position: '蛋卷持仓模拟',
+  ai_corrected: 'AI估值纠偏'
+}
+
+watch(() => [props.show, props.fund?.stockCode, props.estimateSource], async ([show, code, source], oldValue) => {
+  const [prevShow, prevCode, prevSource] = Array.isArray(oldValue) ? oldValue : [false, '', '']
+  if (show && code && (code !== prevCode || source !== prevSource || (!prevShow && show) || !profile.value)) {
     activeTab.value = 'overview'
+    if (code !== prevCode) fundHoldings.value = []
     await loadProfile({ silent: true })
   }
 }, { immediate: true })
 
-watch([estimateTrend, performanceTrend], async () => {
+watch([estimateTrend, performanceTrend, estimateCompareTrend], async () => {
   if (!props.show) return
   await nextTick()
   renderCharts()
@@ -225,6 +309,7 @@ watch([estimateTrend, performanceTrend], async () => {
 
 watch(activeTab, async () => {
   if (!props.show) return
+  if (activeTab.value === 'holdings') await loadFundHoldings()
   await nextTick()
   renderCharts()
 })
@@ -251,9 +336,14 @@ async function loadProfile(options = {}) {
   if (!code || !window.go?.main?.App?.GetFundProfile) return
   if (!silent) loading.value = true
   try {
-    const loader = refresh && window.go?.main?.App?.RefreshFundProfile
-      ? window.go.main.App.RefreshFundProfile(code)
-      : window.go.main.App.GetFundProfile(code)
+    const source = normalizeEstimateSource(props.estimateSource)
+    const loader = refresh
+      ? (window.go?.main?.App?.RefreshFundProfileByFundEstimateSource
+        ? window.go.main.App.RefreshFundProfileByFundEstimateSource(code, source)
+        : window.go.main.App.RefreshFundProfile(code))
+      : (window.go?.main?.App?.GetFundProfileByFundEstimateSource
+        ? window.go.main.App.GetFundProfileByFundEstimateSource(code, source)
+        : window.go.main.App.GetFundProfile(code))
     profile.value = (await withTimeout(loader, refresh ? 20000 : 5000)) || props.fund
     if (refresh) emit('refreshed')
     await nextTick()
@@ -268,6 +358,7 @@ async function loadProfile(options = {}) {
 
 async function handleRefreshProfile() {
   await loadProfile({ refresh: true })
+  if (activeTab.value === 'holdings') await loadFundHoldings({ force: true })
 }
 
 function handleShowUpdate(value) { emit('update:show', value) }
@@ -276,11 +367,46 @@ function openFundPage() {
   if (code && window.go?.main?.App?.OpenURL) window.go.main.App.OpenURL(`https://fund.eastmoney.com/${code}.html`)
 }
 
-function renderCharts() { renderEstimateChart(); renderPerformanceChart() }
-function resizeCharts() { estimateChart?.resize(); performanceChart?.resize() }
+async function loadFundHoldings(options = {}) {
+  const { force = false } = options
+  const code = props.fund?.stockCode
+  if (!code || !window.go?.main?.App?.GetFundTop10Holdings) return
+  if (fundHoldings.value.length && !force) return
+  holdingsLoading.value = true
+  try {
+    const result = await withTimeout(window.go.main.App.GetFundTop10Holdings(code), 10000)
+    fundHoldings.value = (Array.isArray(result) ? result : []).map(normalizeHoldingStock)
+  } catch (error) {
+    console.error(error)
+    message.error('重仓股加载失败')
+  } finally {
+    holdingsLoading.value = false
+  }
+}
+
+function normalizeHoldingStock(item) {
+  return {
+    rank: Number(item?.rank || 0),
+    stockCode: String(item?.stockCode || '').trim(),
+    stockName: String(item?.stockName || '').trim(),
+    ratio: num(item?.ratio),
+    quarter: String(item?.quarter || '').trim(),
+    price: num(item?.price),
+    changeRate: num(item?.changeRate),
+    market: String(item?.market || '').trim()
+  }
+}
+
+function normalizeEstimateSource(value) {
+  return Object.prototype.hasOwnProperty.call(estimateSourceOptions, value) ? value : 'eastmoney_js'
+}
+
+function renderCharts() { renderEstimateChart(); renderPerformanceChart(); renderEstimateCompareChart() }
+function resizeCharts() { estimateChart?.resize(); performanceChart?.resize(); estimateCompareChart?.resize() }
 function disposeCharts() {
   if (estimateChart) { estimateChart.dispose(); estimateChart = null }
   if (performanceChart) { performanceChart.dispose(); performanceChart = null }
+  if (estimateCompareChart) { estimateCompareChart.dispose(); estimateCompareChart = null }
 }
 
 function renderEstimateChart() {
@@ -305,7 +431,9 @@ function renderPerformanceChart() {
   }
   if (!performanceChart) performanceChart = echarts.init(performanceChartRef.value)
   const points = performanceTrend.value
-  const repairs = repairTrend.value
+  const repair = repairInfo.value
+  const drawdownData = buildSegmentSeriesData(points, repair.peakIndex, repair.valleyIndex, 'percent')
+  const repairData = buildSegmentSeriesData(points, repair.valleyIndex, repair.recoveredIndex ?? points.length - 1, 'percent')
   performanceChart.setOption({
     backgroundColor: 'transparent',
     animation: false,
@@ -315,7 +443,7 @@ function renderPerformanceChart() {
       itemWidth: 18,
       itemHeight: 8,
       textStyle: { color: '#91a3b8', fontSize: 11 },
-      data: ['业绩走势', '回撤修复']
+      data: ['业绩走势', '最大回撤', repair.recovered ? '修复区间' : '修复中']
     },
     grid: { left: 18, right: 18, top: 42, bottom: 26, containLabel: true },
     tooltip: {
@@ -326,11 +454,11 @@ function renderPerformanceChart() {
       formatter: (params) => {
         const index = params?.[0]?.dataIndex ?? 0
         const point = points[index]
-        const repairPoint = repairs[index]
+        const drawdown = repair.peakValue > 0 ? ((Number(point?.value || 0) - repair.peakValue) / repair.peakValue) * 100 : null
         return [
           point?.date || '-',
           '业绩走势 ' + formatPercent(point?.percent),
-          '回撤修复 ' + formatPercentNoSign(repairPoint?.progress),
+          '相对前高回撤 ' + (drawdown === null ? '-' : formatPercent(drawdown)),
           '单位净值 ' + formatPrice(point?.value, 4)
         ].join('<br/>')
       }
@@ -348,14 +476,7 @@ function renderPerformanceChart() {
         scale: true,
         axisLine: { show: false },
         splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } },
-        axisLabel: { color: '#91a3b8', formatter: (value) =>           Number(value || 0).toFixed(2) + '%' }
-      },
-      {
-        type: 'value',
-        min: 0,
-        max: 100,
-        splitLine: { show: false },
-        axisLabel: { color: '#fbbf24', formatter: (value) =>           Number(value || 0).toFixed(0) + '%' }
+        axisLabel: { color: '#91a3b8', formatter: (value) => Number(value || 0).toFixed(2) + '%' }
       }
     ],
     series: [
@@ -377,16 +498,118 @@ function renderPerformanceChart() {
           lineStyle: { color: 'rgba(148,163,184,0.24)', type: 'dashed' },
           label: { color: '#91a3b8' },
           data: [{ yAxis: 0 }]
+        },
+        markArea: buildRepairMarkArea(points, repair)
+      },
+      {
+        name: '最大回撤',
+        type: 'line',
+        data: drawdownData,
+        smooth: false,
+        symbol: 'none',
+        connectNulls: true,
+        lineStyle: { width: 3, color: '#2dd4bf' },
+        itemStyle: { color: '#2dd4bf' },
+        label: {
+          show: true,
+          formatter: (params) => params.dataIndex === repair.valleyIndex ? `最大回撤${formatPercentNoSign(repair.maxDrawdown)}` : '',
+          color: '#eafffb',
+          backgroundColor: 'rgba(45, 212, 191, 0.82)',
+          borderRadius: 4,
+          padding: [5, 7],
+          position: 'top'
         }
       },
       {
-        name: '回撤修复',
+        name: repair.recovered ? '修复区间' : '修复中',
         type: 'line',
-        yAxisIndex: 1,
-        data: repairs.map((p) => p.progress),
-        smooth: true,
+        data: repairData,
+        smooth: false,
         symbol: 'none',
-        lineStyle: { width: 2, color: '#f59e0b', type: 'dashed' }
+        connectNulls: true,
+        lineStyle: { width: 3, color: repair.recovered ? '#fb7185' : '#f59e0b' },
+        itemStyle: { color: repair.recovered ? '#fb7185' : '#f59e0b' },
+        label: {
+          show: true,
+          formatter: (params) => params.dataIndex === (repair.recoveredIndex ?? points.length - 1) ? repair.repairDaysText : '',
+          color: '#fff1f2',
+          backgroundColor: repair.recovered ? 'rgba(244, 63, 94, 0.82)' : 'rgba(245, 158, 11, 0.82)',
+          borderRadius: 4,
+          padding: [5, 7],
+          position: 'top'
+        }
+      }
+    ]
+  })
+}
+
+function renderEstimateCompareChart() {
+  if (activeTab.value !== 'analysis' || !estimateCompareChartRef.value || !estimateCompareTrend.value.length) {
+    if (estimateCompareChart) { estimateCompareChart.dispose(); estimateCompareChart = null }
+    return
+  }
+  if (!estimateCompareChart) estimateCompareChart = echarts.init(estimateCompareChartRef.value)
+  const points = estimateCompareTrend.value
+  estimateCompareChart.setOption({
+    backgroundColor: 'transparent',
+    animation: false,
+    legend: {
+      top: 0,
+      right: 12,
+      itemWidth: 18,
+      itemHeight: 8,
+      textStyle: { color: '#91a3b8', fontSize: 11 },
+      data: [estimateCompareEstimateLabel.value, '实际涨跌']
+    },
+    grid: { left: 18, right: 18, top: 42, bottom: 26, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(10,16,26,0.94)',
+      borderColor: 'rgba(148,163,184,0.18)',
+      textStyle: { color: '#e5eef9' },
+      formatter: (params) => {
+        const point = points[params?.[0]?.dataIndex ?? 0]
+        return [
+          point?.date || '-',
+          estimateCompareEstimateLabel.value + ' ' + formatPercent(point?.estimatedRate),
+          '实际涨跌 ' + formatPercent(point?.actualRate),
+          '估算时间 ' + (point?.estimateTime || '-'),
+          '来源 ' + (point?.sourceLabel || point?.source || '-')
+        ].join('<br/>')
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: points.map((p) => p.date.slice(5)),
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.18)' } },
+      axisLabel: { color: '#91a3b8', fontSize: 11 }
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLine: { show: false },
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } },
+      axisLabel: { color: '#91a3b8', formatter: (value) => `${Number(value || 0).toFixed(2)}%` }
+    },
+    series: [
+      {
+        name: estimateCompareEstimateLabel.value,
+        type: 'line',
+        data: points.map((p) => p.estimatedRate),
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { width: 2, color: '#60a5fa' }
+      },
+      {
+        name: '实际涨跌',
+        type: 'line',
+        data: points.map((p) => p.actualRate),
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { width: 2, color: '#34d399' }
       }
     ]
   })
@@ -441,29 +664,6 @@ function normalizePerformanceTrend(points) {
   return points.map((item) => ({ ...item, percent: base ? ((Number(item.value || 0) - base) / base) * 100 : 0 }))
 }
 
-function buildRepairTrend(points) {
-  if (!Array.isArray(points) || !points.length) return []
-  let peak = Number(points[0]?.value || 0)
-  let valley = peak
-  let peakAtValley = peak
-  return points.map((item) => {
-    const value = Number(item?.value || 0)
-    if (value >= peak) {
-      peak = value
-      valley = value
-      peakAtValley = value
-      return { ...item, progress: 100 }
-    }
-    if (value < valley) {
-      valley = value
-      peakAtValley = peak
-    }
-    const denominator = peakAtValley - valley
-    const progress = denominator > 0 ? Math.max(0, Math.min(100, ((value - valley) / denominator) * 100)) : 100
-    return { ...item, progress }
-  })
-}
-
 function normalizeEstimateTrend(points, confirmedUnit) {
   const base = Number(confirmedUnit || 0)
   return (Array.isArray(points) ? points : []).map((item) => {
@@ -483,18 +683,118 @@ function buildEstimateStats(points) {
 }
 
 function buildRepairInfo(points) {
-  if (!Array.isArray(points) || !points.length) return { peakValue: 0, valleyValue: 0, currentValue: 0, maxDrawdown: 0, progress: 0, progressText: '-', status: '暂无走势数据' }
-  let peak = points[0].value; let peakAtMax = peak; let valley = peak; let maxDrawdown = 0
-  for (const point of points) {
-    if (point.value > peak) peak = point.value
-    const drawdown = peak > 0 ? ((point.value - peak) / peak) * 100 : 0
-    if (drawdown < maxDrawdown) { maxDrawdown = drawdown; peakAtMax = peak; valley = point.value }
+  if (!Array.isArray(points) || !points.length) {
+    return {
+      peakValue: 0,
+      valleyValue: 0,
+      currentValue: 0,
+      maxDrawdown: 0,
+      peakIndex: 0,
+      valleyIndex: 0,
+      recoveredIndex: null,
+      recovered: false,
+      repairDays: null,
+      repairDaysText: '-',
+      status: '暂无走势数据'
+    }
   }
-  const currentValue = points.at(-1).value
-  const denominator = peakAtMax - valley
-  const progress = Math.min(100, Math.max(0, denominator > 0 ? ((currentValue - valley) / denominator) * 100 : 100))
-  const status = currentValue >= peakAtMax ? '已修复' : (progress >= 70 ? '修复接近完成' : (progress > 0 ? '修复中' : '仍在低位'))
-  return { peakValue: peakAtMax, valleyValue: valley, currentValue, maxDrawdown: Math.abs(maxDrawdown), progress, progressText: `${progress.toFixed(0)}%`, status }
+
+  let runningPeak = Number(points[0]?.value || 0)
+  let runningPeakIndex = 0
+  let peakIndex = 0
+  let valleyIndex = 0
+  let maxDrawdown = 0
+
+  points.forEach((point, index) => {
+    const value = Number(point?.value || 0)
+    if (value > runningPeak) {
+      runningPeak = value
+      runningPeakIndex = index
+    }
+    const drawdown = runningPeak > 0 ? ((value - runningPeak) / runningPeak) * 100 : 0
+    if (drawdown < maxDrawdown) {
+      maxDrawdown = drawdown
+      peakIndex = runningPeakIndex
+      valleyIndex = index
+    }
+  })
+
+  const peakValue = Number(points[peakIndex]?.value || 0)
+  const valleyValue = Number(points[valleyIndex]?.value || peakValue)
+  let recoveredIndex = null
+  if (Math.abs(maxDrawdown) > 0) {
+    for (let i = valleyIndex + 1; i < points.length; i += 1) {
+      if (Number(points[i]?.value || 0) >= peakValue) {
+        recoveredIndex = i
+        break
+      }
+    }
+  }
+
+  const currentValue = Number(points.at(-1)?.value || 0)
+  const recovered = recoveredIndex !== null
+  const repairDays = recovered
+    ? daysBetween(points[valleyIndex]?.date, points[recoveredIndex]?.date)
+    : daysBetween(points[valleyIndex]?.date, points.at(-1)?.date)
+  const repairDaysText = Math.abs(maxDrawdown) <= 0
+    ? '无明显回撤'
+    : (recovered ? `${repairDays}天修复` : `修复中 ${repairDays}天`)
+  const status = Math.abs(maxDrawdown) <= 0
+    ? '区间内未形成回撤'
+    : (recovered ? `从 ${shortDate(points[valleyIndex]?.date)} 到 ${shortDate(points[recoveredIndex]?.date)}` : `低点后尚未回到前高 ${formatPrice(peakValue, 4)}`)
+
+  return {
+    peakValue,
+    valleyValue,
+    currentValue,
+    maxDrawdown: Math.abs(maxDrawdown),
+    peakIndex,
+    valleyIndex,
+    recoveredIndex,
+    recovered,
+    repairDays,
+    repairDaysText,
+    status
+  }
+}
+
+function buildSegmentSeriesData(points, startIndex, endIndex, key) {
+  if (!Array.isArray(points) || !points.length || startIndex === null || startIndex === undefined || endIndex === null || endIndex === undefined) {
+    return []
+  }
+  return points.map((point, index) => (index >= startIndex && index <= endIndex ? point?.[key] : null))
+}
+
+function buildRepairMarkArea(points, repair) {
+  if (!repair?.recovered || !Array.isArray(points) || !points[repair.valleyIndex] || !points[repair.recoveredIndex]) {
+    return undefined
+  }
+  return {
+    silent: true,
+    itemStyle: { color: 'rgba(244, 63, 94, 0.10)' },
+    data: [[
+      { xAxis: points[repair.valleyIndex].date.slice(5) },
+      { xAxis: points[repair.recoveredIndex].date.slice(5) }
+    ]]
+  }
+}
+
+function daysBetween(startDate, endDate) {
+  const start = parseDateOnly(startDate)
+  const end = parseDateOnly(endDate)
+  if (!start || !end) return 0
+  return Math.max(0, Math.round((end - start) / 86400000))
+}
+
+function parseDateOnly(value) {
+  if (!value) return null
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
+function shortDate(value) {
+  return value ? String(value).slice(5, 10) : '-'
 }
 
 function inferCategoryLabel(fundType, fundName) {
@@ -509,6 +809,34 @@ function inferCategoryLabel(fundType, fundName) {
   if (text.includes('纯债') || text.includes('债')) return '债券基金'
   if (text.includes('ETF') || text.includes('指数') || text.includes('股票') || text.includes('混合') || text.includes('QDII') || text.includes('FOF') || text.includes('REIT')) return '权益类基金'
   return '其他基金'
+}
+
+function normalizeEstimateCompareTrend(points) {
+  return (Array.isArray(points) ? points : [])
+    .map((item) => ({
+      ...item,
+      estimatedRate: num(item?.estimatedRate),
+      actualRate: num(item?.actualRate),
+      sourceLabel: estimateSourceLabel(item?.source)
+    }))
+    .filter((item) => item.date && item.estimatedRate !== null && item.actualRate !== null)
+}
+
+function estimateSourceLabel(source) {
+  switch (source) {
+    case 'eastmoney_js':
+      return '天天基金 JS'
+    case 'eastmoney_mobile':
+      return '天天基金移动端'
+    case 'danjuan_position':
+      return '蛋卷持仓模拟'
+    case 'ai_corrected':
+      return 'AI估值纠偏'
+    case 'eastmoney':
+      return '天天基金估算'
+    default:
+      return source || '-'
+  }
 }
 
 function num(value) { return value === null || value === undefined || Number.isNaN(Number(value)) ? null : Number(value) }
@@ -759,6 +1087,51 @@ function withTimeout(promise, timeoutMs) {
   margin-top: 6px;
 }
 
+.holdings-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(97, 118, 148, 0.14);
+  border-radius: 18px;
+}
+
+.holdings-row {
+  display: grid;
+  grid-template-columns: 56px minmax(150px, 1.6fr) 72px 88px 92px 92px;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: rgba(11, 19, 31, 0.38);
+  border-bottom: 1px solid rgba(97, 118, 148, 0.10);
+}
+
+.holdings-row:last-child {
+  border-bottom: 0;
+}
+
+.holdings-row.header {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.holdings-row strong,
+.holdings-row em {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdings-row em {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-style: normal;
+  font-size: 12px;
+}
+
 .empty {
   padding: 48px 0 30px;
   text-align: center;
@@ -799,6 +1172,15 @@ function withTimeout(promise, timeoutMs) {
   .ranking-grid,
   .mini-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .holdings-row {
+    grid-template-columns: 44px minmax(120px, 1.4fr) 58px 72px;
+  }
+
+  .holdings-row span:nth-child(5),
+  .holdings-row span:nth-child(6) {
+    display: none;
   }
 }
 </style>

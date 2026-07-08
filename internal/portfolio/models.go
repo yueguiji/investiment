@@ -138,6 +138,14 @@ type FundEstimatePoint struct {
 	EstimatedRate *float64 `json:"estimatedRate"`
 }
 
+type FundEstimateComparePoint struct {
+	Date          string   `json:"date"`
+	EstimateTime  string   `json:"estimateTime"`
+	EstimatedRate *float64 `json:"estimatedRate"`
+	ActualRate    *float64 `json:"actualRate"`
+	Source        string   `json:"source"`
+}
+
 type FundStageRanking struct {
 	Period             string   `json:"period"`
 	ReturnRate         *float64 `json:"returnRate"`
@@ -154,14 +162,16 @@ type FundStageRanking struct {
 
 type FundProfile struct {
 	FundHoldingView
-	Trend                  []FundTrendPoint    `json:"trend"`
-	TrendUpdatedAt         string              `json:"trendUpdatedAt"`
-	LatestReturn           *float64            `json:"latestReturn"`
-	EstimateTrend          []FundEstimatePoint `json:"estimateTrend"`
-	EstimateTrendUpdatedAt string              `json:"estimateTrendUpdatedAt"`
-	EstimateLatestRate     *float64            `json:"estimateLatestRate"`
-	StageRankings          []FundStageRanking  `json:"stageRankings"`
-	StageRankingsUpdatedAt string              `json:"stageRankingsUpdatedAt"`
+	Trend                  []FundTrendPoint           `json:"trend"`
+	TrendUpdatedAt         string                     `json:"trendUpdatedAt"`
+	LatestReturn           *float64                   `json:"latestReturn"`
+	EstimateTrend          []FundEstimatePoint        `json:"estimateTrend"`
+	EstimateTrendUpdatedAt string                     `json:"estimateTrendUpdatedAt"`
+	EstimateLatestRate     *float64                   `json:"estimateLatestRate"`
+	EstimateSource         string                     `json:"estimateSource"`
+	EstimateCompareTrend   []FundEstimateComparePoint `json:"estimateCompareTrend"`
+	StageRankings          []FundStageRanking         `json:"stageRankings"`
+	StageRankingsUpdatedAt string                     `json:"stageRankingsUpdatedAt"`
 }
 
 type FundScreenerQuery struct {

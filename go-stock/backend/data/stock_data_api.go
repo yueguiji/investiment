@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
@@ -46,7 +47,7 @@ type StockDataApi struct {
 type StockInfo struct {
 	gorm.Model
 	Date     string  `json:"日期" gorm:"index"`
-	Time     string  `json:"时间" gorm:"index"`
+	Time     string  `json:"时间" gorm:"index" `
 	Code     string  `json:"股票代码" gorm:"index"`
 	Name     string  `json:"股票名称" gorm:"index"`
 	PrePrice float64 `json:"上次当前价格"`
@@ -177,10 +178,76 @@ type FollowedStock struct {
 	IsDel              soft_delete.DeletedAt `gorm:"softDelete:flag"`
 	Groups             []GroupStock          `gorm:"foreignKey:StockCode;references:StockCode"`
 	AiConfigId         int
+	EntryPrice         float64
+	TakeProfitPrice    float64
+	StopLossPrice      float64
 }
 
 func (receiver FollowedStock) TableName() string {
 	return "followed_stock"
+}
+
+// TradingRecord 交易日志结构体
+type TradingRecord struct {
+	ID              uint   `gorm:"primaryKey"`
+	StockCode       string `gorm:"index"`
+	StockName       string
+	Direction       string `gorm:"index"` // 买入/卖出
+	Price           float64
+	Volume          int64
+	Amount          float64   `gorm:"-"` // 计算字段: Price * Volume
+	TradingTime     time.Time `gorm:"index"`
+	Reason          string    `gorm:"type:text"`
+	StopLossPrice   float64
+	TakeProfitPrice float64
+	Fee             float64
+	MarketValue     float64
+	Mindset         string `gorm:"type:text"`
+	// RecordedClosePrice 保存时写入的当日收盘价或现价快照，列表盈亏计算优先使用，减少重复请求行情
+	RecordedClosePrice float64 `json:"recordedClosePrice" gorm:"column:recorded_close_price"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (receiver TradingRecord) TableName() string {
+	return "trading_records"
+}
+
+// TradingRecordListQuery 交易日志列表查询（与前端分页、筛选参数一致）
+type TradingRecordListQuery struct {
+	Page      int    `json:"page"`
+	PageSize  int    `json:"pageSize"`
+	Keyword   string `json:"keyword"`   // 股票代码或名称模糊匹配
+	Direction string `json:"direction"` // 买入 / 卖出，空表示全部
+	StartDate string `json:"startDate"` // yyyy-MM-dd，交易时间起始（含当日 0 点）
+	EndDate   string `json:"endDate"`   // yyyy-MM-dd，交易时间结束（含当日）
+}
+
+// TradingRecordPageData 交易日志分页结果
+type TradingRecordPageData struct {
+	List       []TradingRecordItem `json:"list"`
+	Total      int64               `json:"total"`
+	Page       int                 `json:"page"`
+	PageSize   int                 `json:"pageSize"`
+	TotalPages int                 `json:"totalPages"`
+}
+
+// TradingRecordItem 交易日志项（包含盈亏信息）
+type TradingRecordItem struct {
+	TradingRecord
+	ClosePrice    float64 `json:"closePrice"`    // 收盘价或最新价
+	ProfitAmount  float64 `json:"profitAmount"`  // 盈亏金额
+	ProfitPercent float64 `json:"profitPercent"` // 盈亏收益率
+}
+
+type TradingRecordStatistics struct {
+	TotalBuyAmount  float64 `json:"totalBuyAmount"`
+	TotalSellAmount float64 `json:"totalSellAmount"`
+	TotalProfit     float64 `json:"totalProfit"`
+	ProfitRate      float64 `json:"profitRate"`
+	HoldingsAmount  float64 `json:"holdingsAmount"`
+	CurrentValue    float64 `json:"currentValue"`
+	StockCount      int64   `json:"stockCount"`
 }
 
 type TushareStockBasicResponse struct {
@@ -198,9 +265,10 @@ type StockBasicResponse struct {
 func (receiver StockBasic) TableName() string {
 	return "tushare_stock_basic"
 }
+
 func NewStockDataApi() *StockDataApi {
 	return &StockDataApi{
-		client: resty.New(),
+		client: SharedHTTPClient,
 		config: GetSettingConfig(),
 	}
 }
@@ -298,6 +366,8 @@ func (receiver StockDataApi) GetStockBaseInfo() {
 }
 
 func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]StockInfo, error) {
+	StockCodes = ConvertTushareCodeToStockCodes(StockCodes)
+
 	stockInfos := make([]StockInfo, 0)
 
 	hkcodes := slice.Filter(StockCodes, func(i int, s string) bool {
@@ -318,7 +388,7 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 			SetHeader("Referer", "https://gu.qq.com/").
 			SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 			Get(url)
-		logger.SugaredLogger.Infof("GetStockCodeRealTimeData %s", url)
+		//logger.SugaredLogger.Infof("GetStockCodeRealTimeData %s", url)
 		if err != nil {
 			logger.SugaredLogger.Error(err.Error())
 			return &[]StockInfo{}, err
@@ -330,6 +400,9 @@ func (receiver StockDataApi) GetStockCodeRealTimeData(StockCodes ...string) (*[]
 			stockData, err := ParseTxStockData(data)
 			if err != nil {
 				logger.SugaredLogger.Error(err.Error())
+				continue
+			}
+			if stockData == nil {
 				continue
 			}
 			stockInfos = append(stockInfos, *stockData)
@@ -417,9 +490,10 @@ func (receiver StockDataApi) Follow(stockCode string) string {
 	}
 	count := int64(0)
 	db.Dao.Model(&FollowedStock{}).Where("is_del = ?", 0).Count(&count)
-	logger.SugaredLogger.Errorf("Follow-count %v", count)
-	if count >= 63 {
-		return "最多只能关注63只股票"
+	//logger.SugaredLogger.Errorf("Follow-count %v", count)
+	// VIP 用户（有效期内）不限制关注数量，非 VIP 用户最多关注 63 只
+	if _, active := EffectiveSponsorVipLevel(); !active && count >= 63 {
+		return "最多只能关注63只股票，升级VIP后不限数量"
 	}
 
 	stockCode = strings.ToLower(stockCode)
@@ -562,8 +636,43 @@ func (receiver StockDataApi) SetStockAICron(cron string, stockCode string) {
 	db.Dao.Model(&FollowedStock{}).Where("stock_code = ?", strings.ToLower(stockCode)).Update("cron", cron)
 
 }
+func (receiver StockDataApi) SetTradingPrice(entryPrice, takeProfitPrice, stopLossPrice, costPrice float64, stockCode string) string {
+	stockCode = strings.ToUpper(stockCode)
+	if strings.HasSuffix(stockCode, ".SZ") {
+		stockCode = "sz" + strings.TrimSuffix(stockCode, ".SZ")
+	} else if strings.HasSuffix(stockCode, ".SH") {
+		stockCode = "sh" + strings.TrimSuffix(stockCode, ".SH")
+	} else if strings.HasSuffix(stockCode, ".HK") {
+		stockCode = "hk" + strings.TrimSuffix(stockCode, ".HK")
+	} else if strings.HasSuffix(stockCode, ".BJ") {
+		stockCode = "bj" + strings.TrimSuffix(stockCode, ".BJ")
+	} else if strings.HasPrefix(stockCode, "GB_") {
+		stockCode = strings.Replace(stockCode, "GB_", "us", 1)
+	}
+	lowerStockCode := strings.ToLower(stockCode)
+
+	var stock FollowedStock
+	if err := db.Dao.Model(&FollowedStock{}).Where("stock_code = ?", lowerStockCode).First(&stock).Error; err != nil {
+		return "股票未关注"
+	}
+
+	updates := &map[string]any{
+		"entry_price":       entryPrice,
+		"take_profit_price": takeProfitPrice,
+		"stop_loss_price":   stopLossPrice,
+		"cost_price":        costPrice,
+	}
+	result := db.Dao.Model(&FollowedStock{}).Where("stock_code = ?", lowerStockCode).Updates(updates)
+	if result.Error != nil {
+		return "设置失败"
+	}
+	if result.RowsAffected == 0 {
+		return "设置失败"
+	}
+	return "设置成功"
+}
 func (receiver StockDataApi) GetFollowList(groupId int) *[]FollowedStock {
-	logger.SugaredLogger.Infof("GetFollowList %d", groupId)
+	//logger.SugaredLogger.Infof("GetFollowList %d", groupId)
 
 	var result *[]FollowedStock
 	if groupId == 0 {
@@ -574,7 +683,7 @@ func (receiver StockDataApi) GetFollowList(groupId int) *[]FollowedStock {
 			return []string{info.StockCode}
 		})
 		db.Dao.Model(&FollowedStock{}).Where("stock_code in ?", codes).Order("sort asc,time desc").Find(&result)
-		logger.SugaredLogger.Infof("GetFollowList %+v", result)
+		//logger.SugaredLogger.Infof("GetFollowList %+v", result)
 	}
 	return result
 }
@@ -653,7 +762,43 @@ func (receiver StockDataApi) GetStockList(key string) []StockBasic {
 		existingStocks[item.SECUCODE] = true
 	}
 
+	// 场内基金（ETF）也纳入搜索：GetFundList 会在本地 FundBasic 缺失时触发东方财富在线搜索并缓存。
+	// 这样即使通达信同步未覆盖 ETF（未重启 / 同步失败 / 本地无缓存），也能立即搜到如 513310 中韩半导体。
+	if key != "" {
+		funds := NewFundApi().GetFundList(key)
+		for _, fund := range funds {
+			if !IsOnExchangeFund(fund.Code) {
+				continue
+			}
+			tsCode := fundCodeToTsCode(fund.Code)
+			if tsCode == "" || existingStocks[tsCode] {
+				continue
+			}
+			result = append(result, StockBasic{
+				TsCode:   tsCode,
+				Name:     fund.Name,
+				Fullname: fund.FullName,
+				Market:   tsCode[len(tsCode)-2:],
+			})
+			existingStocks[tsCode] = true
+		}
+	}
+
 	return result
+}
+
+// fundCodeToTsCode 场内基金纯代码转 ts_code（如 513310 → 513310.SH，159915 → 159915.SZ）
+func fundCodeToTsCode(code string) string {
+	if len(code) == 0 {
+		return ""
+	}
+	if strings.HasPrefix(code, "5") || strings.HasPrefix(code, "6") {
+		return code + ".SH"
+	}
+	if strings.HasPrefix(code, "1") || strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+		return code + ".SZ"
+	}
+	return code + ".SH"
 }
 
 func (receiver StockDataApi) GetFollowedStockByStockCode(code string) FollowedStock {
@@ -1157,7 +1302,7 @@ func getUSStockPriceInfo(stockCode string, crawlTimeOut int64) *[]string {
 		messages = append(messages, text)
 	})
 
-	logger.SugaredLogger.Infof("messages: %s", messages)
+	//logger.SugaredLogger.Infof("messages: %s", messages)
 	return &messages
 }
 
@@ -1175,7 +1320,7 @@ func getHKStockPriceInfo(stockCode string, crawlTimeOut int64) *[]string {
 	crawlerAPI = crawlerAPI.NewCrawler(ctx, crawlerBaseInfo)
 
 	url := fmt.Sprintf("https://stock.finance.sina.com.cn/hkstock/quotes/%s.html", strings.ReplaceAll(stockCode, "hk", ""))
-	logger.SugaredLogger.Infof("CrawlHKStockPriceInfo url:%s", url)
+	//logger.SugaredLogger.Infof("CrawlHKStockPriceInfo url:%s", url)
 	htmlContent, ok := crawlerAPI.GetHtml(url, "div.deta_hqContainer >.deta03>ul ", false)
 	if !ok {
 		return &[]string{}
@@ -1212,7 +1357,7 @@ func getHKStockPriceInfo(stockCode string, crawlTimeOut int64) *[]string {
 		messages = append(messages, text)
 	})
 
-	logger.SugaredLogger.Infof("messages: %s", messages)
+	//logger.SugaredLogger.Infof("messages: %s", messages)
 	return &messages
 }
 
@@ -1367,7 +1512,7 @@ func (receiver StockDataApi) GetStockMinutePriceData(stockCode string) (*[]Minut
 	if strutil.HasPrefixAny(stockCode, []string{"us", "US"}) {
 		url = fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/UsMinute/query?code=%s", stockCode)
 	}
-	logger.SugaredLogger.Infof("GetStockMinutePriceData url:%s", url)
+	//logger.SugaredLogger.Infof("GetStockMinutePriceData url:%s", url)
 	res := make(map[string]interface{})
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "web.ifzq.gtimg.cn").
@@ -1378,7 +1523,7 @@ func (receiver StockDataApi) GetStockMinutePriceData(stockCode string) (*[]Minut
 	minuteDatas := &[]MinuteData{}
 
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return minuteDatas, date
 	}
 	//logger.SugaredLogger.Infof("resp:%s", resp.Body())
@@ -1434,7 +1579,7 @@ func (receiver StockDataApi) GetKLineData(stockCode string, kLineType string, da
 }
 func (receiver StockDataApi) GetHK_KLineData(stockCode string, kLineType string, days int64) *[]KLineData {
 
-	logger.SugaredLogger.Infof("GetHK_KLineData stockCode:%s,kLineType:%s,days:%d", stockCode, kLineType, days)
+	//logger.SugaredLogger.Infof("GetHK_KLineData stockCode:%s,kLineType:%s,days:%d", stockCode, kLineType, days)
 	if strutil.HasPrefixAny(stockCode, []string{"gb_", "GB_"}) {
 		stockCode = strings.Replace(stockCode, "gb_", "us", 1) + ".OQ"
 	}
@@ -1448,7 +1593,7 @@ func (receiver StockDataApi) GetHK_KLineData(stockCode string, kLineType string,
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return K
 	}
 	//logger.SugaredLogger.Infof("resp:%s", resp.Body())
@@ -1485,17 +1630,6 @@ func (receiver StockDataApi) GetHK_KLineData(stockCode string, kLineType string,
 	}
 	return K
 }
-func (receiver StockDataApi) GetSinaHKStockInfo() {
-
-	pageSize := 500
-	for i := 1; i <= 3060/pageSize; i++ {
-		infos := getSinaStockInfo(receiver, i, pageSize)
-		for i, info := range *infos {
-			logger.SugaredLogger.Infof("infos:%d,%s:%s", i, info.Symbol, info.Name)
-		}
-	}
-
-}
 
 func getSinaStockInfo(receiver StockDataApi, page, pageSize int) *[]models.SinaStockInfo {
 	infos := &[]models.SinaStockInfo{}
@@ -1507,7 +1641,7 @@ func getSinaStockInfo(receiver StockDataApi, page, pageSize int) *[]models.SinaS
 		Get(fmt.Sprintf(url, page, pageSize))
 
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	return infos
 }
@@ -1525,40 +1659,40 @@ func (receiver StockDataApi) getDCStockInfo(market string, page, pageSize int) {
 
 	url := "https://push2.eastmoney.com/api/qt/clist/get?np=1&fltt=1&invt=2&cb=data&fs=%s&fields=f12,f13,f14,f1,f2,f4,f3,f152,f5,f6,f7,f15,f18,f16,f17,f10,f8,f9,f23,f100,f265&fid=f3&pn=%d&pz=%d&po=1&dect=1&wbp2u=|0|0|0|web&_=%d"
 	sprintfUrl := fmt.Sprintf(url, fs, page, pageSize, time.Now().UnixMilli())
-	logger.SugaredLogger.Infof("page:%d  url:%s", page, sprintfUrl)
+	//logger.SugaredLogger.Infof("page:%d  url:%s", page, sprintfUrl)
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "push2.eastmoney.com").
 		SetHeader("Referer", "https://quote.eastmoney.com/center/gridlist.html").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0").
 		Get(sprintfUrl)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return
 	}
 	body := string(resp.Body())
-	logger.SugaredLogger.Infof("resp:%s", body)
+	//logger.SugaredLogger.Infof("resp:%s", body)
 	vm := otto.New()
 	vm.Run("function data(res){return res};")
 	val, err := vm.Run(body)
 	if err != nil {
-		logger.SugaredLogger.Errorf("vm.Run error:%v", err.Error())
+		//logger.SugaredLogger.Errorf("vm.Run error:%v", err.Error())
 	}
 	value, _ := val.Object().Value().Export()
 	marshal, err := json.Marshal(value)
 	data := make(map[string]any)
 	err = json.Unmarshal(marshal, &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
+		//logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
 	}
-	logger.SugaredLogger.Infof("resp:%s", data)
+	//logger.SugaredLogger.Infof("resp:%s", data)
 	if data["data"] != nil {
 		datas := data["data"].(map[string]any)
-		total := datas["total"].(float64)
+		_ = datas["total"].(float64)
 		diff := datas["diff"].([]any)
-		logger.SugaredLogger.Infof("total:%d", int(total))
-		for k, item := range diff {
+		//logger.SugaredLogger.Infof("total:%d", int(total))
+		for _, item := range diff {
 			stock := item.(map[string]any)
-			logger.SugaredLogger.Infof("k:%d,%s:%s:%s %s:%s", k, stock["f14"], stock["f12"], DCToTsCode(stock["f12"].(string)), stock["f100"], stock["f265"])
+			//logger.SugaredLogger.Infof("k:%d,%s:%s:%s %s:%s", k, stock["f14"], stock["f12"], DCToTsCode(stock["f12"].(string)), stock["f100"], stock["f265"])
 
 			if market == "" {
 				stockInfo := &StockBasic{
@@ -1569,7 +1703,7 @@ func (receiver StockDataApi) getDCStockInfo(market string, page, pageSize int) {
 					BKCode: stock["f265"].(string),
 				}
 				db.Dao.Model(&StockBasic{}).Where("symbol = ?", stockInfo.Symbol).First(stockInfo)
-				logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
+				//logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
 				if stockInfo.ID == 0 {
 					db.Dao.Model(&StockBasic{}).Create(stockInfo)
 				} else {
@@ -1592,7 +1726,7 @@ func (receiver StockDataApi) getDCStockInfo(market string, page, pageSize int) {
 					BKCode: stock["f265"].(string),
 				}
 				db.Dao.Model(&models.StockInfoHK{}).Where("code = ?", stockInfo.Code).First(stockInfo)
-				logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
+				//logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
 				if stockInfo.ID == 0 {
 					db.Dao.Model(&models.StockInfoHK{}).Create(stockInfo)
 				} else {
@@ -1614,7 +1748,7 @@ func (receiver StockDataApi) getDCStockInfo(market string, page, pageSize int) {
 					BKCode: stock["f265"].(string),
 				}
 				db.Dao.Model(&models.StockInfoUS{}).Where("code = ?", stockInfo.Code).First(stockInfo)
-				logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
+				//logger.SugaredLogger.Infof("stockInfo:%+v", stockInfo)
 				if stockInfo.ID == 0 {
 					db.Dao.Model(&models.StockInfoUS{}).Create(stockInfo)
 				} else {
@@ -1659,7 +1793,7 @@ func (receiver StockDataApi) GetHKStockInfo(pageSize int) {
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(fmt.Sprintf(url, pageSize))
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return
 	}
 	js := "var " + string(resp.Body())
@@ -1673,25 +1807,25 @@ func (receiver StockDataApi) GetHKStockInfo(pageSize int) {
 	data := make(map[string]any)
 	err = json.Unmarshal([]byte(value.String()), &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
+		//logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
 	}
-	logger.SugaredLogger.Infof("resp:%s", data)
+	//logger.SugaredLogger.Infof("resp:%s", data)
 	if data["code"] != nil && data["code"].(float64) == 0 {
 		d := data["data"].(map[string]any)
 		saveHKStockInfo(d)
 
 		page_count := int64(d["page_count"].(float64))
-		logger.SugaredLogger.Infof("page_count:%d", page_count)
+		//logger.SugaredLogger.Infof("page_count:%d", page_count)
 		page := int64(1)
 		for page > page_count {
 			urlx := fmt.Sprintf("https://stock.gtimg.cn/data/hk_rank.php?board=main_all&metric=price&pageSize=%d&reqPage=%d&order=desc&var_name=list_data", pageSize, page)
-			logger.SugaredLogger.Infof("url:%s", urlx)
+			//logger.SugaredLogger.Infof("url:%s", urlx)
 			resp, err = receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 				SetHeader("Host", "stock.gtimg.cn").
 				SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 				Get(urlx)
 			if err != nil {
-				logger.SugaredLogger.Errorf("err:%s", err.Error())
+				//logger.SugaredLogger.Errorf("err:%s", err.Error())
 				break
 			}
 			js = "var " + string(resp.Body())
@@ -1704,9 +1838,9 @@ func (receiver StockDataApi) GetHKStockInfo(pageSize int) {
 			data = make(map[string]any)
 			err = json.Unmarshal([]byte(value.String()), &data)
 			if err != nil {
-				logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
+				//logger.SugaredLogger.Errorf("json.Unmarshal error:%v", err.Error())
 			}
-			logger.SugaredLogger.Infof("resp:%s", data)
+			//logger.SugaredLogger.Infof("resp:%s", data)
 			if data != nil && data["code"] != nil && data["code"].(float64) == 0 {
 				if data["data"] != nil {
 					d = data["data"].(map[string]any)
@@ -1728,10 +1862,10 @@ func saveHKStockInfo(d map[string]any) {
 			Code: strutil.PadStart(splits[0], 5, "0") + ".HK",
 			Name: splits[1],
 		}
-		logger.SugaredLogger.Infof("vv:%s", vv)
+		//logger.SugaredLogger.Infof("vv:%s", vv)
 		db.Dao.Model(stock).Where("code = ?", stock.Code).First(stock)
 		if stock.ID == 0 {
-			logger.SugaredLogger.Infof("stock:%+v", stock)
+			//logger.SugaredLogger.Infof("stock:%+v", stock)
 			db.Dao.Model(&models.StockInfoHK{}).Create(stock)
 		}
 	}
@@ -1740,7 +1874,7 @@ func saveHKStockInfo(d map[string]any) {
 func (receiver StockDataApi) GetCommonKLineData(stockCode string, kLineType string, days int64) *[]KLineData {
 
 	url := fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq", stockCode, kLineType, days)
-	logger.SugaredLogger.Infof("url:%s", url)
+	//logger.SugaredLogger.Infof("url:%s", url)
 	K := &[]KLineData{}
 	res := make(map[string]interface{})
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
@@ -1748,10 +1882,10 @@ func (receiver StockDataApi) GetCommonKLineData(stockCode string, kLineType stri
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return K
 	}
-	logger.SugaredLogger.Infof("resp:%s", resp.Body())
+	//logger.SugaredLogger.Infof("resp:%s", resp.Body())
 	json.Unmarshal(resp.Body(), &res)
 	code, _ := convertor.ToInt(res["code"])
 	if code != 0 {
@@ -1813,26 +1947,80 @@ func (receiver StockDataApi) GetStockHistoryMoneyData(stockCode string) []models
 		stockCode = strings.Split(stockCode, ".")[1] + "." + strings.Split(stockCode, ".")[0]
 	}
 
-	url := "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?cb=data&lmt=0&klt=101&fields1=f1%2Cf2%2Cf3%2Cf7&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58%2Cf59%2Cf60%2Cf61%2Cf62%2Cf63%2Cf64%2Cf65&ut=b2884a393a59ad64002292a3e90d46a5&secid=" + stockCode + "&_=" + convertor.ToString(time.Now().Unix())
-	logger.SugaredLogger.Infof("url:%s", url)
-	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
-		SetHeader("Host", "push2his.eastmoney.com").
-		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
-		Get(url)
+	baseURL := "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+
+	params := url2.Values{}
+	params.Set("cb", "data")
+	params.Set("lmt", "0")
+	params.Set("klt", "101")
+	params.Set("fields1", "f1,f2,f3,f7")
+	params.Set("fields2", "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65")
+	params.Set("ut", "b2884a393a59ad64002292a3e90d46a5")
+	params.Set("secid", stockCode)
+	params.Set("_", fmt.Sprintf("%d", time.Now().UnixMilli()))
+	reqURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+	//
+	//// 配置强制 IPv4 优先的 Transport，解决 IPv6 连接问题
+	//dialer := &net.Dialer{
+	//	Timeout:       10 * time.Second,
+	//	KeepAlive:     30 * time.Second,
+	//	DualStack:     false, // 禁用双栈
+	//	FallbackDelay: -1,    // 禁用 Happy Eyeballs
+	//}
+	//receiver.client.SetTransport(&http.Transport{
+	//	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	//		// 强制只使用 IPv4
+	//		host, port, err := net.SplitHostPort(addr)
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//		// 解析 A 记录（IPv4）
+	//		ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//		if len(ips) == 0 {
+	//			return nil, fmt.Errorf("no IPv4 address found for %s", host)
+	//		}
+	//		ipv4 := ips[0].String()
+	//		return dialer.DialContext(ctx, "tcp4", net.JoinHostPort(ipv4, port))
+	//	},
+	//	TLSClientConfig: &tls.Config{
+	//		MinVersion: tls.VersionTLS12,
+	//		ServerName: "push2.eastmoney.com",
+	//	},
+	//	DisableCompression:  true, // 禁用自动压缩，手动处理 gzip
+	//	MaxIdleConns:        100,
+	//	MaxIdleConnsPerHost: 10,
+	//	IdleConnTimeout:     90 * time.Second,
+	//	ForceAttemptHTTP2:   false, // 强制使用 HTTP/1.1
+	//})
+
+	//logger.SugaredLogger.Infof("url:%s", reqURL)
+	req := receiver.client.SetHeader("User-Agent", getRandomUA()).R()
+	setEastMoneyKlineBrowserHeaders(req, "https://quote.eastmoney.com")
+	// 使用缓存的 Cookie，pageURL 参数传空字符串由函数内部使用默认值
+	//cookieHeader, err := FetchEastMoneyCookiesViaChromedp("", time.Second*3, reqURL)
+	//if err == nil {
+	//	//logger.SugaredLogger.Infof("Cookie: %s", cookieHeader)
+	//	req.SetHeader("Cookie", cookieHeader)
+	//}
+
+	resp, err := req.Get(reqURL)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	body := string(resp.Body())
-	logger.SugaredLogger.Infof("resp:%s", body)
+	//logger.SugaredLogger.Infof("resp:%s", body)
 	vm := otto.New()
 	vm.Run("function data(res){return res};")
 	val, err := vm.Run(body)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	value, err := val.Export()
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	marshal, err := json.Marshal(value)
 	if err != nil {
@@ -1871,38 +2059,111 @@ func (receiver StockDataApi) GetStockHistoryMoneyData(stockCode string) []models
 
 // GetStockMoneyData 获取个股资金流数据
 func (receiver StockDataApi) GetStockMoneyData() models.StockMoneyDataResp {
+
 	var resData models.StockMoneyDataResp
 	url := "https://push2.eastmoney.com/api/qt/clist/get?cb=data&fid=f62&po=1&pz=50&pn=1&np=1&fltt=2&invt=2&ut=8dec03ba335b81bf4ebdf7b29ec27d15&fs=m:0+t:6+f:!2,m:0+t:13+f:!2,m:0+t:80+f:!2,m:1+t:2+f:!2,m:1+t:23+f:!2,m:0+t:7+f:!2,m:1+t:3+f:!2&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124,f1,f13,f100,f265"
-	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
+	req := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut) * time.Second).R()
+
+	setEastMoneyKlineBrowserHeaders(req, "https://quote.eastmoney.com")
+	// 使用缓存的 Cookie，pageURL 参数传空字符串由函数内部使用默认值
+	//cookieHeader, err := FetchEastMoneyCookiesViaChromedp("", time.Second*3, quoteEastMoneyPage)
+	//if err == nil {
+	//	//logger.SugaredLogger.Infof("Cookie: %s", cookieHeader)
+	//	req.SetHeader("Cookie", cookieHeader)
+	//}
+
+	resp, err := req.
 		SetHeader("Host", "push2.eastmoney.com").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	body := string(resp.Body())
-	logger.SugaredLogger.Infof("resp:%s", body)
+	//logger.SugaredLogger.Infof("resp:%s", body)
 	vm := otto.New()
 	vm.Run("function data(res){return res};")
 	val, err := vm.Run(body)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	value, err := val.Export()
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	marshal, err := json.Marshal(value)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return models.StockMoneyDataResp{}
 	}
 	err = json.Unmarshal(marshal, &resData)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return models.StockMoneyDataResp{}
 	}
 	return resData
+}
+
+// GetMutualTop10Deal 获取互联互通（沪股通/深股通/港股通）十大成交股数据
+// mutualType: 001=沪股通十大成交股, 002=港股通(沪)十大成交股 , 003=深股通十大成交股, 004=港股通(深)十大成交股
+// tradeDate: 交易日期，格式如 2026-03-16
+func (receiver StockDataApi) GetMutualTop10Deal(mutualType, tradeDate string, page, pageSize int) *models.MutualTop10DealResp {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+
+	filter := fmt.Sprintf("(MUTUAL_TYPE=\"%s\")(TRADE_DATE='%s')", mutualType, tradeDate)
+	encodedFilter := url2.QueryEscape(filter)
+
+	url := fmt.Sprintf("https://datacenter-web.eastmoney.com/web/api/data/v1/get?callback=data&sortColumns=RANK&sortTypes=1&pageSize=%d&pageNumber=%d&reportName=RPT_MUTUAL_TOP10DEAL&columns=ALL&source=WEB&client=WEB&filter=%s&_=%d",
+		pageSize, page, encodedFilter, time.Now().UnixMilli())
+
+	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("Host", "datacenter-web.eastmoney.com").
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
+		Get(url)
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal err:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+
+	body := string(resp.Body())
+	//logger.SugaredLogger.Infof("GetMutualTop10Deal resp:%s", body)
+
+	vm := otto.New()
+	// 将 JSONP 回调 data(...) 转成普通对象
+	_, err = vm.Run("function data(res){return res};")
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal vm func error:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+	val, err := vm.Run(body)
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal vm run error:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+	value, err := val.Export()
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal export error:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+
+	marshal, err := json.Marshal(value)
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal marshal error:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+
+	var resData models.MutualTop10DealResp
+	err = json.Unmarshal(marshal, &resData)
+	if err != nil {
+		//logger.SugaredLogger.Errorf("GetMutualTop10Deal unmarshal error:%s", err.Error())
+		return &models.MutualTop10DealResp{}
+	}
+	return &resData
 }
 
 // 获取股票概念题材信息
@@ -1912,7 +2173,7 @@ func (receiver StockDataApi) GetStockConceptInfo(stockCode string) models.StockC
 		stockCode = ConvertStockCodeToTushareCode(stockCode)
 	}
 	url := "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_CORETHEME_BOARDTYPE&columns=SECUCODE%2CSECURITY_CODE%2CSECURITY_NAME_ABBR%2CNEW_BOARD_CODE%2CBOARD_NAME%2CSELECTED_BOARD_REASON%2CIS_PRECISE%2CBOARD_RANK%2CBOARD_YIELD%2CDERIVE_BOARD_CODE&quoteColumns=f3~05~NEW_BOARD_CODE~BOARD_YIELD&filter=(SECUCODE%3D%22" + stockCode + "%22)(IS_PRECISE%3D%221%22)&pageNumber=1&pageSize=&sortTypes=1&sortColumns=BOARD_RANK&source=HSF10&client=PC&v=" + convertor.ToString(time.Now().Unix())
-	logger.SugaredLogger.Infof("url:%s", url2.QueryEscape(url))
+	//logger.SugaredLogger.Infof("url:%s", url2.QueryEscape(url))
 	var data models.StockConceptInfoResp
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "datacenter.eastmoney.com").
@@ -1921,11 +2182,11 @@ func (receiver StockDataApi) GetStockConceptInfo(stockCode string) models.StockC
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	err = json.Unmarshal(resp.Body(), &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return models.StockConceptInfoResp{}
 	}
 	return data
@@ -1938,7 +2199,7 @@ func (receiver StockDataApi) GetStockFinancialInfo(stockCode string) *models.Sto
 	}
 
 	url := "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_DUPONT&columns=SECUCODE%2CSECURITY_CODE%2CSECURITY_NAME_ABBR%2CORG_CODE%2CORG_TYPE%2CREPORT_DATE%2CREPORT_TYPE%2CREPORT_DATE_NAME%2CSECURITY_TYPE_CODE%2CNOTICE_DATE%2CUPDATE_DATE%2CCURRENCY%2CNETPROFIT%2CTOTAL_OPERATE_INCOME%2CTOTAL_ASSETS%2CTOTAL_LIABILITIES%2CTOTAL_CURRENT_ASSETS%2CTOTAL_NONCURRENT_ASSETS%2CPARENT_NETPROFIT%2CSALE_NPR%2CTOTAL_ASSETS_TR%2CJROA%2CPARENT_NETPROFIT_RATIO%2CEQUITY_MULTIPLIER%2CROE%2CDEBT_ASSET_RATIO%2CTOTAL_INCOME%2CTOTAL_COST%2CTOTAL_EXPENSE%2CMONETARYFUNDS%2CTRADE_FINASSET%2CNOTE_RECE%2CACCOUNTS_RECE%2CFINANCE_RECE%2COTHER_RECE%2CINVENTORY%2CCREDITOR_INVEST%2CLONG_EQUITY_INVEST%2CINVEST_REALESTATE%2CFIXED_ASSET%2CCIP%2CUSERIGHT_ASSET%2CINTANGIBLE_ASSET%2CDEVELOP_EXPENSE%2CGOODWILL%2CLONG_PREPAID_EXPENSE%2CDEFER_TAX_ASSET%2CINVEST_INCOME%2CEXCHANGE_INCOME%2CFAIRVALUE_CHANGE_INCOME%2CASSET_DISPOSAL_INCOME%2COPERATE_COST%2CSURRENDER_VALUE%2CNET_COMPENSATE_EXPENSE%2CNET_CONTRACT_RESERVE%2CPOLICY_BONUS_EXPENSE%2COPERATE_TAX_ADD%2CINCOME_TAX%2CASSET_IMPAIRMENT_INCOME%2CCREDIT_IMPAIRMENT_INCOME%2CNONBUSINESS_EXPENSE%2CFINANCE_EXPENSE%2CSALE_EXPENSE%2CMANAGE_EXPENSE%2CRESEARCH_EXPENSE%2CINTEREST_NI%2CFEE_COMMISSION_NI%2CEARNED_PREMIUM%2CBUSINESS_MANAGE_EXPENSE%2COTHER_CREDITOR_INVEST%2COTHER_EQUITY_INVEST%2CLONG_RECE%2CAVAILABLE_SALE_FINASSET%2CHOLD_MATURITY_INVEST%2CFEE_COMMISSION_EXPENSE&quoteColumns=&filter=(SECUCODE%3D%22" + stockCode + "%22)&pageNumber=1&pageSize=12&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC&v=" + convertor.ToString(time.Now().Unix())
-	logger.SugaredLogger.Infof("url:%s", url)
+	//logger.SugaredLogger.Infof("url:%s", url)
 	var data models.StockFinancialInfoResp
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "datacenter.eastmoney.com").
@@ -1948,15 +2209,15 @@ func (receiver StockDataApi) GetStockFinancialInfo(stockCode string) *models.Sto
 		//SetResult(&data).
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	//logger.SugaredLogger.Infof("resp:%s", string(resp.Body()))
 	err = json.Unmarshal(resp.Body(), &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return &models.StockFinancialInfoResp{}
 	}
-	logger.SugaredLogger.Infof("data:%v", data)
+	//logger.SugaredLogger.Infof("data:%v", data)
 	return &data
 }
 
@@ -1965,7 +2226,7 @@ func (receiver StockDataApi) GetStockHolderNum(stockCode string) *models.StockHo
 		stockCode = ConvertStockCodeToTushareCode(stockCode)
 	}
 	url := "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_EH_HOLDERNUM&columns=SECUCODE%2CSECURITY_CODE%2CEND_DATE%2CHOLDER_TOTAL_NUM%2CTOTAL_NUM_RATIO%2CAVG_FREE_SHARES%2CAVG_FREESHARES_RATIO%2CHOLD_FOCUS%2CPRICE%2CAVG_HOLD_AMT%2CHOLD_RATIO_TOTAL%2CFREEHOLD_RATIO_TOTAL&quoteColumns=&filter=(SECUCODE%3D%22" + stockCode + "%22)&pageNumber=1&pageSize=12&sortTypes=-1&sortColumns=END_DATE&source=HSF10&client=PC&v=" + strconv.Itoa(time.Now().Nanosecond())
-	logger.SugaredLogger.Infof("url:%s", url)
+	//logger.SugaredLogger.Infof("url:%s", url)
 	var data models.StockHolderNumResp
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "datacenter.eastmoney.com").
@@ -1975,11 +2236,11 @@ func (receiver StockDataApi) GetStockHolderNum(stockCode string) *models.StockHo
 		//SetResult(&data).
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	err = json.Unmarshal(resp.Body(), &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return &models.StockHolderNumResp{}
 	}
 	return &data
@@ -1992,29 +2253,29 @@ func (receiver StockDataApi) GetIndustryValuation(bkName string) *models.Industr
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	body := string(resp.Body())
-	logger.SugaredLogger.Infof("resp:%s", body)
+	//logger.SugaredLogger.Infof("resp:%s", body)
 	vm := otto.New()
 	vm.Run("function data(res){return res};")
 	val, err := vm.Run(body)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	value, err := val.Export()
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	marshal, err := json.Marshal(value)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
-	logger.SugaredLogger.Infof("data:%s", string(marshal))
+	//logger.SugaredLogger.Infof("data:%s", string(marshal))
 	data := models.IndustryValuationResp{}
 	err = json.Unmarshal(marshal, &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	return &data
 }
@@ -2042,31 +2303,42 @@ func (receiver StockDataApi) GetAllStocks(page int, pageSize int, name string, t
 				indicatorConditions = append(indicatorConditions, condition)
 			}
 		}
+		if value.Kind() == reflect.Int && value.Int() != 0 {
+			// 获取 JSON 标签作为字段名
+			jsonTag := field.Tag.Get("json")
+			operator := field.Tag.Get("operator")
+
+			if jsonTag != "" {
+				// 构建查询条件格式：如 (UPP_DAYS>=3)
+				condition := fmt.Sprintf("(%s%s%d)", jsonTag, operator, value.Int())
+				indicatorConditions = append(indicatorConditions, condition)
+			}
+		}
 	}
 	// 拼接所有条件
 	if len(indicatorConditions) > 0 {
 		indicators = strings.Join(indicatorConditions, "")
 	}
-	logger.SugaredLogger.Infof("indicators:%s", indicators)
+	//logger.SugaredLogger.Infof("indicators:%s", indicators)
 
-	logger.SugaredLogger.Infof("GetAllStocks page:%d,pageSize:%d,name:%s", page, pageSize, name)
+	//logger.SugaredLogger.Infof("GetAllStocks page:%d,pageSize:%d,name:%s", page, pageSize, name)
 	search := ""
 	if name != "" {
 		search = fmt.Sprintf("(SECURITY_NAME_ABBR in (\"%s\"))", name)
 	}
 	url := "https://data.eastmoney.com/dataapi/xuangu/list?st=CHANGE_RATE&sr=-1&ps=" + convertor.ToString(pageSize) + "&p=" + convertor.ToString(page) + "&sty=SECUCODE%2CSECURITY_CODE%2CSECURITY_NAME_ABBR%2CNEW_PRICE%2CCHANGE_RATE%2CVOLUME_RATIO%2CHIGH_PRICE%2CLOW_PRICE%2CPRE_CLOSE_PRICE%2CVOLUME%2CDEAL_AMOUNT%2CTURNOVERRATE%2CMARKET%2CCONCEPT%2CINDUSTRY&filter=%28MARKET+in+%28%22%E4%B8%8A%E4%BA%A4%E6%89%80%E4%B8%BB%E6%9D%BF%22%2C%22%E6%B7%B1%E4%BA%A4%E6%89%80%E4%B8%BB%E6%9D%BF%22%2C%22%E6%B7%B1%E4%BA%A4%E6%89%80%E5%88%9B%E4%B8%9A%E6%9D%BF%22%2C%22%E4%B8%8A%E4%BA%A4%E6%89%80%E7%A7%91%E5%88%9B%E6%9D%BF%22%2C%22%E4%B8%8A%E4%BA%A4%E6%89%80%E9%A3%8E%E9%99%A9%E8%AD%A6%E7%A4%BA%E6%9D%BF%22%2C%22%E6%B7%B1%E4%BA%A4%E6%89%80%E9%A3%8E%E9%99%A9%E8%AD%A6%E7%A4%BA%E6%9D%BF%22%2C%22%E5%8C%97%E4%BA%AC%E8%AF%81%E5%88%B8%E4%BA%A4%E6%98%93%E6%89%80%22%29%29" + url2.QueryEscape(search+indicators) + "&source=SELECT_SECURITIES&client=WEB&hyversion=v2"
-	logger.SugaredLogger.Infof("url:%s", url)
+	//logger.SugaredLogger.Infof("url:%s", url)
 	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
 		SetHeader("Host", "data.eastmoney.com").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
 		Get(url)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 	}
 	data := models.AllStocksResp{}
 	err = json.Unmarshal(resp.Body(), &data)
 	if err != nil {
-		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		//logger.SugaredLogger.Errorf("err:%s", err.Error())
 		return &models.AllStocksResp{}
 	}
 	//for _, info := range data.Result.Data {
@@ -2128,12 +2400,19 @@ func JSONToMarkdownTable(jsonData []byte) (string, error) {
 }
 
 type KLineData struct {
-	Day    string `json:"day"`
-	Open   string `json:"open"`
-	High   string `json:"high"`
-	Low    string `json:"low"`
-	Close  string `json:"close"`
-	Volume string `json:"volume"`
+	Day           string            `json:"day" md:"时间/日期"`
+	Open          string            `json:"open" md:"开盘价"`
+	Close         string            `json:"close" md:"收盘价"`
+	High          string            `json:"high" md:"最高价"`
+	Low           string            `json:"low" md:"最低价"`
+	Volume        string            `json:"volume" md:"成交量"`
+	Amount        string            `json:"amount" md:"成交额"`
+	ChangePercent string            `json:"changePercent" md:"涨跌幅"`
+	ChangeValue   string            `json:"changeValue" md:"涨跌额"`
+	Amplitude     string            `json:"amplitude" md:"振幅"`
+	TurnoverRate  string            `json:"turnoverRate" md:"换手率"`
+	VolumeRatio   string            `json:"volumeRatio" md:"量比"`
+	MA            map[string]string `json:"ma,omitempty" md:"均线"` // 周期 -> 均线值，如 "5":"12.34"，由 GetKLineWithMA 填充
 }
 
 type MinuteData struct {
@@ -2286,4 +2565,532 @@ func (receiver StockDataApi) GetStockInfoByCode(secucode string) models.AllStock
 	var stock models.AllStockInfo
 	db.Dao.Model(&models.AllStockInfo{}).Where("secucode = ?", secucode).First(&stock)
 	return stock
+}
+
+// GetStockRZRQInfo 获取融资融券信息
+func (receiver StockDataApi) GetStockRZRQInfo(stockCode string) models.StockRZRQInfoResp {
+	var StockRZRQInfoResp models.StockRZRQInfoResp
+	if !strutil.ContainsAny(stockCode, []string{"."}) {
+		stockCode = ConvertStockCodeToTushareCode(stockCode)
+	}
+	filter := url2.QueryEscape(fmt.Sprintf("(SECUCODE=\"%s\")", stockCode))
+	url := "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_RZRQ_STOCKS_DETAIL&columns=MARKET_NAME%2CMARKET_CODE%2CTRADE_DATE%2CSECURITY_CODE%2CSECUCODE%2CSECURITY_NAME_ABBR%2CFIN_BALANCE%2CFIN_BUY_AMT%2CFIN_REPAY_AMT%2CLOAN_BALANCE%2CLOAN_SELL_VOL%2CLOAN_REPAY_VOL%2CMARGIN_BALANCE%2CLOAN_BALANCE_VOL%2CFIN_NETBUY_AMT&quoteColumns=&filter=" + filter + "&pageNumber=1&pageSize=50&sortTypes=-1&sortColumns=TRADE_DATE&source=Datacenter&client=PC&v=" + convertor.ToString(time.Now().Unix())
+	resp, err := receiver.client.SetTimeout(time.Duration(receiver.config.CrawlTimeOut)*time.Second).R().
+		SetHeader("Host", "datacenter.eastmoney.com").
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0").
+		Get(url)
+	if err != nil {
+		logger.SugaredLogger.Errorf("err:%s", err.Error())
+		return StockRZRQInfoResp
+	}
+	json.Unmarshal(resp.Body(), &StockRZRQInfoResp)
+	return StockRZRQInfoResp
+}
+
+// AddTradingRecord 添加交易日志
+func (receiver StockDataApi) AddTradingRecord(record TradingRecord) (uint, error) {
+	record.TradingTime = record.TradingTime.In(time.Local)
+
+	// 检查频繁交易
+	if record.Direction == "买入" {
+		canTrade, msg := receiver.CheckFrequentTrading(record.StockCode)
+		if !canTrade {
+			return 0, fmt.Errorf("%s", msg)
+		}
+	}
+
+	// 自动计算金额（价格 * 数量）
+	record.Amount = record.Price * float64(record.Volume)
+
+	// 设置交易时间为当前时间（如果未提供）
+	if record.TradingTime.IsZero() {
+		record.TradingTime = time.Now()
+	}
+
+	receiver.fillTradingRecordCloseSnapshot(&record)
+
+	// 保存到数据库
+	err := db.Dao.Model(&TradingRecord{}).Create(&record).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("添加交易日志失败: %s", err.Error())
+		return 0, err
+	}
+
+	return record.ID, nil
+}
+
+// tradingRecordFIFOLot 交易日志先入先出批次
+type tradingRecordFIFOLot struct {
+	Volume int64
+	Price  float64
+}
+
+// fifoAvgUnitCost 按先入先出计算卖出数量对应的单位持仓成本（不修改批次）
+func fifoAvgUnitCost(lots []tradingRecordFIFOLot, sellVol int64) (avg float64, ok bool) {
+	if sellVol <= 0 {
+		return 0, false
+	}
+	var cost float64
+	var got int64
+	for i := range lots {
+		if got >= sellVol {
+			break
+		}
+		if lots[i].Volume <= 0 {
+			continue
+		}
+		need := sellVol - got
+		take := need
+		if take > lots[i].Volume {
+			take = lots[i].Volume
+		}
+		cost += float64(take) * lots[i].Price
+		got += take
+	}
+	if got < sellVol {
+		return 0, false
+	}
+	return cost / float64(got), true
+}
+
+// normalizeTradingRecordAPI 将交易日志中的代码转为实时/K 线接口使用的代码
+func normalizeTradingRecordAPI(stockCode string) string {
+	apiCode := stockCode
+	if strings.Contains(apiCode, " - ") {
+		apiCode = strings.Split(apiCode, " - ")[0]
+	}
+	apiCode = strings.ToLower(apiCode)
+	if strings.HasSuffix(apiCode, ".sh") {
+		apiCode = "sh" + strings.TrimSuffix(apiCode, ".sh")
+	} else if strings.HasSuffix(apiCode, ".sz") {
+		apiCode = "sz" + strings.TrimSuffix(apiCode, ".sz")
+	} else if strings.HasSuffix(apiCode, ".bj") {
+		apiCode = "bj" + strings.TrimSuffix(apiCode, ".bj")
+	} else if strings.HasPrefix(apiCode, "6") || len(apiCode) == 6 {
+		apiCode = "sh" + apiCode
+	} else if strings.HasPrefix(apiCode, "0") || strings.HasPrefix(apiCode, "3") {
+		apiCode = "sz" + apiCode
+	} else if strings.HasPrefix(apiCode, "4") || strings.HasPrefix(apiCode, "8") {
+		apiCode = "bj" + apiCode
+	}
+	return apiCode
+}
+
+// resolveTradingRecordClosePrice 按交易日期解析收盘价或现价（无缓存，供写入快照与列表补拉共用）
+func (receiver StockDataApi) resolveTradingRecordClosePrice(apiCode string, tradingTime time.Time, fallback float64) float64 {
+	if strings.TrimSpace(apiCode) == "" {
+		return fallback
+	}
+	tradingTime = tradingTime.In(time.Local)
+	now := time.Now()
+	tradingDateStr := tradingTime.Format("2006-01-02")
+	todayStr := now.Format("2006-01-02")
+	closePrice := fallback
+	isToday := tradingDateStr == todayStr
+	isFuture := tradingTime.After(now)
+	if isToday || isFuture {
+		stockDatas, err := receiver.GetStockCodeRealTimeData(apiCode)
+		if err == nil && stockDatas != nil && len(*stockDatas) > 0 {
+			price, _ := convertor.ToFloat((*stockDatas)[0].Price)
+			if price > 0 {
+				closePrice = price
+			}
+		}
+	} else {
+		klines := receiver.GetCommonKLineData(apiCode, "day", 30)
+		if klines != nil {
+			for _, k := range *klines {
+				if k.Day == tradingDateStr {
+					cp, _ := convertor.ToFloat(k.Close)
+					if cp > 0 {
+						closePrice = cp
+					}
+					break
+				}
+			}
+		}
+	}
+	return closePrice
+}
+
+// fillTradingRecordCloseSnapshot 写入/刷新记录的收盘价快照（添加、修改时调用）
+func (receiver StockDataApi) fillTradingRecordCloseSnapshot(record *TradingRecord) {
+	if record == nil {
+		return
+	}
+	apiCode := normalizeTradingRecordAPI(record.StockCode)
+	record.RecordedClosePrice = receiver.resolveTradingRecordClosePrice(apiCode, record.TradingTime, record.Price)
+}
+
+// GetTradingRecordList 获取交易日志列表（分页、关键词、方向、交易日期范围）
+func (receiver StockDataApi) GetTradingRecordList(query TradingRecordListQuery) (*TradingRecordPageData, error) {
+	var records []TradingRecord
+	q := db.Dao.Model(&TradingRecord{})
+
+	page := query.Page
+	pageSize := query.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	if kw := strings.TrimSpace(query.Keyword); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("stock_code LIKE ? OR stock_name LIKE ?", like, like)
+	}
+	if dir := strings.TrimSpace(query.Direction); dir != "" {
+		q = q.Where("direction = ?", dir)
+	}
+	if sd := strings.TrimSpace(query.StartDate); sd != "" {
+		if start, err := time.ParseInLocation("2006-01-02", sd, time.Local); err == nil {
+			q = q.Where("trading_time >= ?", start)
+		}
+	}
+	if ed := strings.TrimSpace(query.EndDate); ed != "" {
+		if end, err := time.ParseInLocation("2006-01-02", ed, time.Local); err == nil {
+			q = q.Where("trading_time < ?", end.Add(24*time.Hour))
+		}
+	}
+
+	var total int64
+	err := q.Count(&total).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("获取交易日志总数失败: %s", err.Error())
+		return nil, err
+	}
+
+	offset := (page - 1) * pageSize
+	err = q.Offset(offset).Limit(pageSize).Order("trading_time DESC, id DESC").Find(&records).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("获取交易日志列表失败: %s", err.Error())
+		return nil, err
+	}
+
+	needProfitByID := make(map[uint]struct{}, len(records))
+	for _, r := range records {
+		needProfitByID[r.ID] = struct{}{}
+	}
+
+	var allGlobal []TradingRecord
+	if err := db.Dao.Model(&TradingRecord{}).Order("trading_time ASC, id ASC").Find(&allGlobal).Error; err != nil {
+		logger.SugaredLogger.Errorf("获取交易日志全局序失败: %s", err.Error())
+		return nil, err
+	}
+
+	type rowProfit struct {
+		closePrice    float64
+		profitAmount  float64
+		profitPercent float64
+	}
+	profitByID := make(map[uint]rowProfit, len(records))
+
+	closeCache := make(map[string]float64)
+
+	resolveClose := func(apiCode string, tradingTime time.Time, fallback float64, recorded float64) float64 {
+		// 当天或未来日期的记录始终获取实时行情，不使用缓存快照
+		tradingDateStr := tradingTime.Format("2006-01-02")
+		key := apiCode + "|" + tradingDateStr
+		if tradingDateStr == time.Now().Format("2006-01-02") || tradingTime.After(time.Now()) {
+			closePrice := receiver.resolveTradingRecordClosePrice(apiCode, tradingTime, fallback)
+			closeCache[key] = closePrice
+			return closePrice
+		}
+		// 历史记录优先使用已保存的快照
+		if recorded > 0 {
+			return recorded
+		}
+		if v, ok := closeCache[key]; ok {
+			return v
+		}
+		closePrice := receiver.resolveTradingRecordClosePrice(apiCode, tradingTime, fallback)
+		closeCache[key] = closePrice
+		return closePrice
+	}
+
+	stockHoldings := make(map[string][]tradingRecordFIFOLot)
+	// 需要回写收盘价快照的历史记录：RecordedClosePrice == 0 且成功获取到 closePrice
+	type closeBackfill struct {
+		id         uint
+		closePrice float64
+	}
+	var backfills []closeBackfill
+	todayStr := time.Now().Format("2006-01-02")
+	now := time.Now()
+
+	for _, r := range allGlobal {
+		_, need := needProfitByID[r.ID]
+		apiCode := normalizeTradingRecordAPI(r.StockCode)
+		tradingDateStr := r.TradingTime.In(time.Local).Format("2006-01-02")
+
+		if r.Direction == "买入" {
+			if need {
+				closePrice := resolveClose(apiCode, r.TradingTime, r.Price, r.RecordedClosePrice)
+				// 历史交易日：把解析到的收盘价落库，避免每次列表重复拉 K 线
+				if r.RecordedClosePrice == 0 && closePrice > 0 && tradingDateStr != todayStr && !r.TradingTime.After(now) {
+					backfills = append(backfills, closeBackfill{id: r.ID, closePrice: closePrice})
+				}
+				if r.Price > 0 {
+					profitByID[r.ID] = rowProfit{
+						closePrice:    closePrice,
+						profitAmount:  (closePrice-r.Price)*float64(r.Volume) - r.Fee,
+						profitPercent: (closePrice - r.Price) / r.Price * 100,
+					}
+				} else {
+					profitByID[r.ID] = rowProfit{closePrice: closePrice}
+				}
+			}
+			stockHoldings[r.StockCode] = append(stockHoldings[r.StockCode], tradingRecordFIFOLot{Volume: r.Volume, Price: r.Price})
+		} else if r.Direction == "卖出" {
+			if need {
+				avgCost, ok := fifoAvgUnitCost(stockHoldings[r.StockCode], r.Volume)
+				closePrice := resolveClose(apiCode, r.TradingTime, r.Price, r.RecordedClosePrice)
+				if r.RecordedClosePrice == 0 && closePrice > 0 && tradingDateStr != todayStr && !r.TradingTime.After(now) {
+					backfills = append(backfills, closeBackfill{id: r.ID, closePrice: closePrice})
+				}
+				if ok && avgCost > 0 {
+					profitByID[r.ID] = rowProfit{
+						closePrice:    closePrice,
+						profitAmount:  (r.Price-avgCost)*float64(r.Volume) - r.Fee,
+						profitPercent: (r.Price - avgCost) / avgCost * 100,
+					}
+				} else {
+					profitByID[r.ID] = rowProfit{closePrice: closePrice}
+				}
+			}
+			remaining := r.Volume
+			for i := range stockHoldings[r.StockCode] {
+				if remaining == 0 {
+					break
+				}
+				rec := &stockHoldings[r.StockCode][i]
+				if rec.Volume <= remaining {
+					remaining -= rec.Volume
+					rec.Volume = 0
+				} else {
+					rec.Volume -= remaining
+					remaining = 0
+				}
+			}
+		}
+	}
+
+	seenBackfill := make(map[uint]struct{}, len(backfills))
+	for _, bf := range backfills {
+		if _, dup := seenBackfill[bf.id]; dup {
+			continue
+		}
+		seenBackfill[bf.id] = struct{}{}
+		res := db.Dao.Model(&TradingRecord{}).Where("id = ? AND (recorded_close_price IS NULL OR recorded_close_price = 0)", bf.id).
+			Update("recorded_close_price", bf.closePrice)
+		if res.Error != nil {
+			logger.SugaredLogger.Warnf("回写交易记录收盘价快照失败 id=%d: %s", bf.id, res.Error.Error())
+		}
+	}
+
+	items := make([]TradingRecordItem, 0, len(records))
+	for _, r := range records {
+		r.Amount = r.Price * float64(r.Volume)
+		item := TradingRecordItem{TradingRecord: r}
+		if p, ok := profitByID[r.ID]; ok {
+			item.ClosePrice = p.closePrice
+			item.ProfitAmount = p.profitAmount
+			item.ProfitPercent = p.profitPercent
+		}
+		items = append(items, item)
+	}
+
+	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	return &TradingRecordPageData{
+		List:       items,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}, nil
+}
+
+// GetTradingRecordStatistics 获取交易日志统计数据
+func (receiver StockDataApi) GetTradingRecordStatistics() (*TradingRecordStatistics, error) {
+	type BuyRecord struct {
+		Volume int64
+		Price  float64
+	}
+
+	var records []TradingRecord
+	err := db.Dao.Model(&TradingRecord{}).Order("trading_time ASC, id ASC").Find(&records).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("获取交易日志统计失败: %s", err.Error())
+		return nil, err
+	}
+
+	stockMap := make(map[string][]BuyRecord)
+	totalBuyAmount := 0.0
+	totalSellAmount := 0.0
+	holdingsCost := 0.0
+	holdingsValue := 0.0
+	costOfSoldShares := 0.0
+
+	for _, r := range records {
+		amount := r.Price * float64(r.Volume)
+		if r.Direction == "买入" {
+			totalBuyAmount += amount
+			stockMap[r.StockCode] = append(stockMap[r.StockCode], BuyRecord{Volume: r.Volume, Price: r.Price})
+		} else if r.Direction == "卖出" {
+			totalSellAmount += amount
+			remainingVolume := r.Volume
+			for i := range stockMap[r.StockCode] {
+				if remainingVolume == 0 {
+					break
+				}
+				record := &stockMap[r.StockCode][i]
+				if record.Volume <= remainingVolume {
+					costOfSoldShares += float64(record.Volume) * record.Price
+					remainingVolume -= record.Volume
+					record.Volume = 0
+				} else {
+					costOfSoldShares += float64(remainingVolume) * record.Price
+					record.Volume -= remainingVolume
+					remainingVolume = 0
+				}
+			}
+		}
+	}
+
+	var stockCount int64
+	for code, buyRecords := range stockMap {
+		currentVolume := int64(0)
+		currentCost := 0.0
+		for _, br := range buyRecords {
+			if br.Volume > 0 {
+				currentVolume += br.Volume
+				currentCost += float64(br.Volume) * br.Price
+			}
+		}
+		if currentVolume > 0 {
+			stockCount++
+			holdingsCost += currentCost
+
+			apiCode := normalizeTradingRecordAPI(code)
+			stockDatas, err := receiver.GetStockCodeRealTimeData(apiCode)
+			if err == nil && stockDatas != nil && len(*stockDatas) > 0 {
+				stock := (*stockDatas)[0]
+				price, _ := convertor.ToFloat(stock.Price)
+				if price == 0 {
+					price, _ = convertor.ToFloat(stock.A1P)
+				}
+				if price > 0 {
+					holdingsValue += price * float64(currentVolume)
+				}
+			}
+		}
+	}
+
+	totalProfit := totalSellAmount - costOfSoldShares + (holdingsValue - holdingsCost)
+	profitRate := 0.0
+	denom := holdingsCost
+	if denom <= 0 && costOfSoldShares > 0 {
+		denom = costOfSoldShares
+	}
+	if denom <= 0 && totalBuyAmount > 0 {
+		denom = totalBuyAmount
+	}
+	if denom > 0 {
+		profitRate = (totalProfit / denom) * 100
+	}
+
+	return &TradingRecordStatistics{
+		TotalBuyAmount:  totalBuyAmount,
+		TotalSellAmount: totalSellAmount,
+		TotalProfit:     totalProfit,
+		ProfitRate:      profitRate,
+		HoldingsAmount:  holdingsCost,
+		CurrentValue:    holdingsValue,
+		StockCount:      stockCount,
+	}, nil
+}
+
+// GetTradingRecordById 根据ID获取单个交易日志
+func (receiver StockDataApi) GetTradingRecordById(id uint) (*TradingRecord, error) {
+	var record TradingRecord
+	err := db.Dao.Model(&TradingRecord{}).Where("id = ?", id).First(&record).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		logger.SugaredLogger.Errorf("获取交易日志失败: %s", err.Error())
+		return nil, err
+	}
+	return &record, nil
+}
+
+// UpdateTradingRecord 更新交易日志
+func (receiver StockDataApi) UpdateTradingRecord(record TradingRecord) error {
+	logger.SugaredLogger.Infof("UpdateTradingRecord: %v", record)
+	// 自动计算金额（价格 * 数量）
+	record.Amount = record.Price * float64(record.Volume)
+
+	record.TradingTime = record.TradingTime.In(time.Local)
+
+	receiver.fillTradingRecordCloseSnapshot(&record)
+
+	err := db.Dao.Model(&TradingRecord{}).Where("id = ?", record.ID).Updates(&record).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("更新交易日志失败: %s", err.Error())
+		return err
+	}
+	// Updates(struct) 会忽略零值字段，收盘价快照单独写入保证落库
+	if err := db.Dao.Model(&TradingRecord{}).Where("id = ?", record.ID).
+		Update("recorded_close_price", record.RecordedClosePrice).Error; err != nil {
+		logger.SugaredLogger.Errorf("更新交易日志收盘价快照失败: %s", err.Error())
+		return err
+	}
+	return nil
+}
+
+// DeleteTradingRecord 删除交易日志
+func (receiver StockDataApi) DeleteTradingRecord(id uint) error {
+	err := db.Dao.Model(&TradingRecord{}).Where("id = ?", id).Delete(&TradingRecord{}).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("删除交易日志失败: %s", err.Error())
+		return err
+	}
+	return nil
+}
+
+// CheckFrequentTrading 检查是否频繁交易
+// 返回值：(是否可以交易, 提示消息)
+func (receiver StockDataApi) CheckFrequentTrading(stockCode string) (bool, string) {
+	// 检查最近24小时内是否有同一只股票的交易日志
+	var count int64
+	cutoffTime := time.Now().Add(-24 * time.Hour)
+
+	err := db.Dao.Model(&TradingRecord{}).Where("stock_code = ? AND direction = ? AND trading_time > ?", stockCode, "买入", cutoffTime).Count(&count).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("检查频繁交易失败: %s", err.Error())
+		return true, "检查频繁交易失败，默认允许交易"
+	}
+
+	if count > 0 {
+		return false, "最近24小时内已对该股票进行过买入操作，为避免频繁交易，建议稍后再操作"
+	}
+
+	// 检查最近7天内的交易次数是否超过限制（例如：5次）
+	cutoffTime7Days := time.Now().Add(-7 * 24 * time.Hour)
+	err = db.Dao.Model(&TradingRecord{}).Where("direction = ? AND trading_time > ?", "买入", cutoffTime7Days).Count(&count).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("检查频繁交易失败: %s", err.Error())
+		return true, "检查频繁交易失败，默认允许交易"
+	}
+
+	if count >= 5 {
+		return false, "最近7天内交易次数已达上限（5次），为避免频繁交易，建议稍后再操作"
+	}
+
+	return true, "可以交易"
 }

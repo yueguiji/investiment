@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import {onBeforeMount, onUnmounted, ref} from 'vue'
 import {HotEvent} from "../../../wailsjs/go/main/App";
 const list  = ref([])
@@ -19,13 +19,10 @@ onUnmounted(async ()=>{
 <template>
   <n-list bordered>
     <template #header>
-      热事件
+      雪球热门
     </template>
-    <n-list-item v-if="list.length === 0">
-      <n-empty description="当前没有可展示的热事件数据" />
-    </n-list-item>
     <n-list-item v-for="(item, index) in list" :key="index">
-        <n-thing :title="item.tag || '市场热事件'" :description="item.content">
+        <n-thing :title="item.tag" :description="item.content"  >
           <template v-if="item.pic" #avatar>
             <n-avatar :src="item.pic" :size="60">
             </n-avatar>

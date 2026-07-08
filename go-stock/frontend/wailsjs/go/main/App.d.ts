@@ -78,6 +78,12 @@ export function GetFollowList(arg1:number):Promise<any>;
 
 export function GetFollowedFund():Promise<Array<data.FollowedFund>>;
 
+export function GetAllGroupStocks():Promise<Array<data.GroupStock>>;
+
+export function GetFundKLine(arg1:string,arg2:string,arg3:number):Promise<data.KLineSourceResult>;
+
+export function GetFundTop10Holdings(arg1:string):Promise<Array<data.FundHoldingStock>>;
+
 export function GetGroupList():Promise<Array<data.Group>>;
 
 export function GetGroupStockList(arg1:number):Promise<Array<data.GroupStock>>;
@@ -177,6 +183,8 @@ export function UnFollow(arg1:string):Promise<string>;
 export function UnFollowFund(arg1:string):Promise<string>;
 
 export function UpdateConfig(arg1:data.SettingConfig):Promise<string>;
+
+export function UpdateGroup(arg1:number,arg2:string):Promise<string>;
 
 export function UpdateGroupSort(arg1:number,arg2:number):Promise<boolean>;
 

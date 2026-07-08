@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import {onBeforeMount, ref} from 'vue'
 import {GetStockList, StockResearchReport} from "../../../wailsjs/go/main/App";
 import {ArrowDownOutline, CaretDown, CaretUp, PulseOutline, Refresh, RefreshCircleSharp,} from "@vicons/ionicons5";
